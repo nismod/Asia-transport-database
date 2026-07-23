@@ -1,3 +1,18 @@
+
+
+# Data 
+*.osm.pbf
+*.gpkg
+data/*
+incoming_data/*
+figures/*
+processed_data/*
+.bak/*
+
+# Editor config
+.vscode
+config.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
