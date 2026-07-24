@@ -18,7 +18,7 @@ tqdm.pandas()
 
 
 
-
+#ds function not used in main, makes a line between two points, if they exist
 def add_lines2(x, nodes_df, from_col, to_col):
     from_id = x[from_col]
     to_id = x[to_col]
@@ -36,7 +36,7 @@ def add_lines2(x, nodes_df, from_col, to_col):
     else:
         return None
 
-
+#ds function not used in main, calculates the haversine distance between two points
 def haversine_distance(point1, point2):
     """
     Calculate the great circle distance between two points 
@@ -58,7 +58,7 @@ def haversine_distance(point1, point2):
     return c * r
 
 def modify_distance(x):
-    if x["length"] < 355 and x["distance"] < 40075:
+    if x["length"] < 355 and x["distance"] < 40075: #ds 355 is close to the length of the equator in degrees?, 40075 is the length of the equator in km
         return x["distance"]
     else:
         start = x.geometry.coords[0]
@@ -73,22 +73,23 @@ def modify_distance(x):
                         round(end[0],2)
                     )
                 )
-def ckdnearest(gdA, gdB):
-        from scipy.spatial import cKDTree
+def ckdnearest(gdA, gdB): # ds gdA and gdB are GeoDataFrames, this function finds the nearest point in gdB for each point in gdA
+        from scipy.spatial import cKDTree 
         import numpy as np
 
-        a_coords = np.array(list(zip(gdA.geometry.x, gdA.geometry.y)))
+        a_coords = np.array(list(zip(gdA.geometry.x, gdA.geometry.y))) #ds zips and retuns as a Numpy array all of the x and y coordinates of the geometries in gdA, to be the correct format for cKDTree
         b_coords = np.array(list(zip(gdB.geometry.x, gdB.geometry.y)))
-        btree = cKDTree(b_coords)
-        dist, idx = btree.query(a_coords, k=1)
-        gdB_nearest = gdB.iloc[idx].reset_index(drop=True)
-        gdf = pd.concat([
-            gdA.reset_index(drop=True),
-            gdB_nearest.add_suffix('_nearest'),
-            pd.Series(dist, name='dist')
-        ], axis=1)
+        btree = cKDTree(b_coords) #ds orgnasies data in a way that makes it quick to find the nearest point
+        dist, idx = btree.query(a_coords, k=1) #ds query (search) the btree for the nearest point (in b_coords) for each point in a_coords, k=1 means we want the single nearest neighbor
+        gdB_nearest = gdB.iloc[idx].reset_index(drop=True) #ds matches the nearest point in gdB to each point in gdA, and resets the index
+        gdf = pd.concat([ #concatenates the original gdA, the nearest points from gdB, and the distances into a single DataFrame
+                gdA.reset_index(drop=True),
+                gdB_nearest.add_suffix('_nearest'),
+                pd.Series(dist, name='dist')
+            ], axis=1) # concatenates along the columns (axis=1)
         return gdf
 
+    #ds functino not used 
 def match_ports(df1, df2, df1_id_column, df2_id_column, cutoff_distance):
     matches = ckdnearest(df1, df2)
 
@@ -98,15 +99,16 @@ def match_ports(df1, df2, df1_id_column, df2_id_column, cutoff_distance):
         f"{df2_id_column}_nearest": df2_id_column,
     })
 
-    matches = matches.sort_values(by="dist", ascending=True)
-    matches["matches"] = np.where(matches["dist"] <= cutoff_distance, "Y", "N")
-    selection = matches[matches["dist"] <= cutoff_distance]
-    selection = selection.drop_duplicates(subset=df1_id_column, keep='first')
-    matched_ids = list(selection[df1_id_column])
+    #If the nearest port is within the cutoff distance, it assumes they represent the same real world port
+    matches = matches.sort_values(by="dist", ascending=True) #ds sort data with smallest distance first 
+    matches["matches"] = np.where(matches["dist"] <= cutoff_distance, "Y", "N") # ds mark matches as "Y" if the distance is less than or equal to the cutoff distance, otherwise "N"
+    selection = matches[matches["dist"] <= cutoff_distance] #ds select only the rows where the distance is less than or equal to the cutoff distance 
+    selection = selection.drop_duplicates(subset=df1_id_column, keep='first') #ds drop duplicate matches, keeping the first one
+    matched_ids = list(selection[df1_id_column]) 
     
     return selection[[df1_id_column, df2_id_column]], df1[~df1[df1_id_column].isin(matched_ids)]
 
-def add_iso_code(df,df_id_column,incoming_data_path):
+def add_iso_code(df,df_id_column,incoming_data_path): # ds assigns ISO country codes to the ports in the dataframe based on their spatial location within a countires spatial boundaries
     # Insert countries' ISO CODE
     africa_boundaries = gpd.read_file(os.path.join(
                             incoming_data_path,
@@ -149,54 +151,65 @@ def main(config):
     
     epsg_meters = 3395 # To convert geometries to measure distances in meters
     cutoff_distance = 6600 # We assume ports within 6.6km are the same
+
     # 1. Read the previously created dataset
     df = gpd.read_file(os.path.join(processed_data_path,
                                     "infrastructure",
-                                    "global_maritime_network.gpkg"),layer = 'nodes') 
-    df["country"] = df.progress_apply(lambda x:str(x["name"]).split("_")[1] if "_" in str(x["name"]) else x['name'],axis=1)
-    df["name"] = df.progress_apply(lambda x:str(x["name"]).split("_")[0] if "_" in str(x["name"]) else x['name'],axis=1)
+                                    "global_maritime_network.gpkg"),layer = 'nodes')
+
+    # ds Inputs: df (loaded above); x is a temporary variable representing each row of df.
+    # ds Output: df with a new "country" column. (same for name and continent)
+    df["country"] = df.progress_apply(lambda x:str(x["name"]).split("_")[1] if "_" in str(x["name"]) else x['name'],axis=1) # ds gets the country of the port, some naming system has city_country, so it splits on the underscore and takes the second part as the country, if there is no underscore, it just takes the name as the country
+    df["name"] = df.progress_apply(lambda x:str(x["name"]).split("_")[0] if "_" in str(x["name"]) else x['name'],axis=1) #ds gets the name of the port, some naming system has city_country, so it splits on the underscore and takes the first part as the name, if there is no underscore, it just takes the name as the name
     df["continent"] = df["Continent_Code"].progress_apply(lambda x: get_continent(x))
+
+    #ds reads all cvs and shapefiles for ports and port attributes
     df_edges = gpd.read_file(os.path.join(processed_data_path,
                                     "infrastructure",
                                     "global_maritime_network.gpkg"),layer = 'edges') 
-    '''
+    
     df_new = gpd.read_file(os.path.join(incoming_data_path,
                                     "Global port supply-chains",
                                     "Ports Updated 2025",
                                     "Ports.shp"))
+
     maritime_values_calls = pd.read_csv(os.path.join(
-                 incoming_data_path,
-                 "Global port supply-chains",
-                                    "Ports Updated 2025",
-                                    "port_calls_average_2019-2024.csv"))
+        incoming_data_path,
+        "Global port supply-chains",
+        "Ports Updated 2025",
+        "port_calls_average_2019-2024.csv"
+    )).drop(columns=["country", "ISO3"], errors="ignore")
+
     maritime_values_cap = pd.read_csv(os.path.join(
-                 incoming_data_path,
-                 "Global port supply-chains",
-                                    "Ports Updated 2025",
-                                    "port_capacity_called_average_2019-2024.csv"))
+        incoming_data_path,
+        "Global port supply-chains",
+        "Ports Updated 2025",
+        "port_capacity_called_average_2019-2024.csv"
+    )).drop(columns=["country", "ISO3"], errors="ignore")
+
     maritime_values_turn = pd.read_csv(os.path.join(
-                 incoming_data_path,
-                 "Global port supply-chains",
-                                    "Ports Updated 2025",
-                                    "port_turn_around_time_average_2019-2024.csv"))
-     
-    merged_gdf = df_new.merge(maritime_values_calls, on='portid', how='left', suffixes=('', '_csv'))
+        incoming_data_path,
+        "Global port supply-chains",
+        "Ports Updated 2025",
+        "port_turn_around_time_average_2019-2024.csv"
+    )).drop(columns=["country", "ISO3"], errors="ignore")
+
+    merged_gdf = df_new.merge(maritime_values_calls, on='portid', how='left', suffixes=('', '_csv')) # ds extracting all the ports present in portwatch data
     merged_gdf = merged_gdf.merge(maritime_values_cap, on='portid', how='left', suffixes=('', '_csv'))
     merged_gdf = merged_gdf.merge(maritime_values_turn, on='portid', how='left', suffixes=('', '_csv'))
    
-
     # Standardize merged_gdf
-    merged_gdf = merged_gdf.rename(columns={"port_name": "name", "ISO3": "iso3"})
-    merged_gdf["infra"] = "port"
-    merged_gdf.drop(columns=["country_csv", "ISO3_csv"], inplace=True, errors="ignore")
+    merged_gdf = merged_gdf.rename(columns={"port_name": "name", "ISO3": "iso3"}) #ds renames the two columns to match df
+    merged_gdf["infra"] = "port" #ds adds a column where all ports are marked as "port" in the "infra" column 
+    merged_gdf.drop(columns=["country_csv", "ISO3_csv"], inplace=True, errors="ignore") #ds removes columns to prevent duplication later on?
 
     # Ensure both GeoDataFrames are in the same CRS
     merged_gdf = merged_gdf.to_crs(epsg=epsg_meters)
     df = df.to_crs(epsg=epsg_meters)
-    port_df = df[df["infra"] == "port"]
+    port_df = df[df["infra"] == "port"] #ds a df dataframe that only contains the ports (not the maritime nodes) from the original df
 
     # Perform spatial join: 'left' to keep all rows from df
-    left_join = gpd.sjoin_nearest(merged_gdf,port_df, how="left", max_distance= 3000)
+    left_join = gpd.sjoin_nearest(merged_gdf,port_df, how="left", max_distance= 3000) # ds Match each new PortWatch port to the nearest existing port in df within 3 km.
 
     # Perform spatial join: 'right' to keep all rows from merged_gdf
     right_join = gpd.sjoin_nearest(port_df, merged_gdf, how="left", max_distance= 3000)
@@ -237,25 +250,24 @@ def main(config):
     
     
    
-    nodes_merged = gpd.GeoDataFrame(nodes_merged, geometry="geometry", crs=epsg_meters)
-    nodes_merged["vessel_cou"] = nodes_merged["vessel_cou"].fillna(0)
-    nodes_merged = nodes_merged.sort_values(by="vessel_cou", ascending=False)
-    nodes_merged = nodes_merged.drop_duplicates(subset=["id"], keep='first')
+    nodes_merged = gpd.GeoDataFrame(nodes_merged, geometry="geometry", crs=epsg_meters) # ds converts nodes to a GeoDataFrame with the specified CRS
+    nodes_merged["vessel_cou"] = nodes_merged["vessel_cou"].fillna(0) # ds replace NaN values in the "vessel_cou" column with 0
+    nodes_merged = nodes_merged.sort_values(by="vessel_cou", ascending=False) # ds sort the nodes by the "vessel_cou" column in descending order
+    nodes_merged = nodes_merged.drop_duplicates(subset=["id"], keep='first') # drop duplicate rows based on the "id" column, keeping the first occurrence
     # print (nodes_merged)
-    '''
-    nodes_merged = df.copy() #ds inputted to remove attribute analysis just for now
+    
 
     """Remove the edges which contain nodes not found in the node list 
     """
     # nodes = nodes_merged["id"].values.tolist()
-    nodes = nodes_merged[(nodes_merged["infra"] == "port") & (nodes_merged["continent"] == "Africa")]["id"].values.tolist()
+    nodes = nodes_merged[(nodes_merged["infra"] == "port") & (nodes_merged["continent"] == "Africa")]["id"].values.tolist() # ds selects only the nodes that are ports and in Africa, and gets their IDs as a list
     print (len(nodes))
-    from_to_nodes = list(set(df_edges["from_id"].values.tolist() + df_edges["to_id"].values.tolist()))
-    extra_nodes = [n for n in from_to_nodes if n not in nodes] 
+    from_to_nodes = list(set(df_edges["from_id"].values.tolist() + df_edges["to_id"].values.tolist())) # ds gets a list of all unique node IDs that are either a "from" or "to" node in the edges dataframe (set means there are no duplicates)
+    extra_nodes = [n for n in from_to_nodes if n not in nodes] # ds nodes that are in the edges but not in the nodes list
     # new_nodes = [n for n in nodes if n not in from_to_nodes]
-    new_nodes = nodes
+    new_nodes = nodes #ds ??
     print (df_edges)
-    df_edges = df_edges[~(df_edges["from_id"].isin(nodes) | df_edges["to_id"].isin(nodes))]
+    df_edges = df_edges[~(df_edges["from_id"].isin(nodes) | df_edges["to_id"].isin(nodes))] #ds Keep only the edges that are not connected to an African port
     print (df_edges)
     # df_edges = df_edges[~(df_edges["from_id"].isin(nodes) | df_edges["to_id"].isin(nodes))]
 
@@ -264,7 +276,7 @@ def main(config):
     #                         ][nodes_merged["id"].isin(new_nodes)][["id","infra","geometry"]]
     df_origins = nodes_merged[
                             nodes_merged["infra"] == "port"
-                            ][nodes_merged["id"].isin(new_nodes)][["id","infra","geometry"]]
+                            ][nodes_merged["id"].isin(new_nodes)][["id","infra","geometry"]] # ds Select the port nodes to reconnect, keeping only their id, infrastructure type and geometry.
     print (df_origins)
     df_origins.rename(columns={"id":"from_id"},inplace=True)
     left_join = gpd.sjoin_nearest(
@@ -304,7 +316,7 @@ def main(config):
     
 
     df_edges = pd.concat([df_edges,left_join,right_join],axis=0,ignore_index=True)
-    #df_edges.drop("id",axis=1,inplace=True) #ds commented out
+    df_edges.drop(columns=["id"], inplace=True, errors="ignore") # ds changed originally df_edges.drop("id",axis=1,inplace=True) 
 
     
 
@@ -338,7 +350,7 @@ def main(config):
                             "infrastructure",
                             "global_maritime_network_PROVA_NEW1.gpkg"),layer="nodes",driver="GPKG")
    
-'''
+    
     # Get the ports for AFRICA
     
     port_edges = gpd.read_file(os.path.join(processed_data_path,
@@ -415,48 +427,8 @@ def main(config):
                             "africa_maritime_network_PROVA_NEW1.gpkg"),
                         layer="edges",driver="GPKG")
     print("Africa maritime network created successfully.")    
-'''
-# replacement sectoin for above with simplifed attribute analysis (section A)
-# ------------------------------------------------------
-# Save the simplified maritime network
-# ------------------------------------------------------
-
-nodes_out = nodes_merged[
-    [
-        "id",
-        "name",
-        "infra",
-        "country",
-        "iso3",
-        "continent",
-        "geometry",
-    ]
-].copy()
-
-edges_out = port_edges[
-    [
-        "id",
-        "from_id",
-        "to_id",
-        "from_infra",
-        "to_infra",
-        "distance_km",
-        "geometry",
-    ]
-].copy()
-
-output_file = os.path.join(
-    processed_data_path,
-    "infrastructure",
-    "africa_maritime_network.gpkg"
-)
-
-nodes_out.to_file(output_file, layer="nodes", driver="GPKG")
-edges_out.to_file(output_file, layer="edges", driver="GPKG")
-
-print("Africa maritime network created successfully.")
-# End of section new section A
-
+    
+    
 if __name__ == '__main__':
     CONFIG = load_config()
     main(CONFIG)
