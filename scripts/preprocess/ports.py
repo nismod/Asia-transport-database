@@ -4,6 +4,7 @@
 import sys
 import os
 import re
+from tkinter import END
 import pandas as pd
 import geopandas as gpd
 import igraph as ig
@@ -51,8 +52,23 @@ def main(config):
     # ds Output: df with a new "country" column. (same for name and continent)
     df["country"] = df.progress_apply(lambda x:str(x["name"]).split("_")[1] if "_" in str(x["name"]) else x['name'],axis=1) # ds gets the country of the port, some naming system has city_country, so it splits on the underscore and takes the second part as the country, if there is no underscore, it just takes the name as the country
     df["name"] = df.progress_apply(lambda x:str(x["name"]).split("_")[0] if "_" in str(x["name"]) else x['name'],axis=1) #ds gets the name of the port, some naming system has city_country, so it splits on the underscore and takes the first part as the name, if there is no underscore, it just takes the name as the name
-    df["continent"] = df["Continent_Code"].progress_apply(lambda x: get_continent(x))
+    #df["continent"] = df["Continent_Code"].progress_apply(lambda x: get_continent(x))
 
+    df["continent"] = df["Continent_Code"].progress_apply(get_continent)
+
+    if continent == "Asia & Pacific":
+
+        extra_asia_iso3 = {
+            "RUS",  # Russia
+            "TUR",  # Turkey
+            "GEO",  # Georgia
+            "ARM",  # Armenia
+            "AZE",  # Azerbaijan
+            "CYP",  # Cyprus
+        }
+
+        df.loc[df["iso3"].isin(extra_asia_iso3), "continent"] = "Asia & Pacific"
+    
     #ds reads all cvs and shapefiles for ports and port attributes
     df_edges = gpd.read_file(os.path.join(processed_data_path,
                                     "infrastructure",
@@ -137,8 +153,8 @@ def main(config):
                                     "country_left": "country",
                                     "continent_left":"continent"}, 
                         inplace=True)
-    
-    
+    nodes_merged.loc[nodes_merged["iso3"].isin(extra_asia_iso3), "continent"] = "Asia & Pacific"
+
    
     nodes_merged = gpd.GeoDataFrame(nodes_merged, geometry="geometry", crs=epsg_meters) # ds converts nodes to a GeoDataFrame with the specified CRS
     nodes_merged["vessel_cou"] = nodes_merged["vessel_cou"].fillna(0) # ds replace NaN values in the "vessel_cou" column with 0
@@ -307,7 +323,7 @@ def main(config):
 
     # Output filename for the selected continent
     output_file = f"{continent.lower()}_maritime_network_PROVA_NEW1.gpkg"
-
+    '''
     continent_nodes.to_file(
         os.path.join(
             processed_data_path,
@@ -317,7 +333,33 @@ def main(config):
         layer="nodes",
         driver="GPKG"
     )
+    
+    '''
+    # Split nodes into ports and maritime nodes
+    port_nodes = continent_nodes[continent_nodes["infra"] == "port"].copy()
+    maritime_nodes = continent_nodes[continent_nodes["infra"] == "maritime"].copy()
 
+    # Save port nodes
+    port_nodes.to_file(
+        os.path.join(
+                    processed_data_path,
+                    "infrastructure",
+                    output_file
+                ),
+        layer="port_nodes",
+        driver="GPKG"
+    )
+
+    # Save maritime nodes
+    maritime_nodes.to_file(
+        os.path.join(
+                    processed_data_path,
+                    "infrastructure",
+                    output_file
+                ),
+        layer="maritime_nodes",
+        driver="GPKG"
+)
     continent_edges.to_file(
         os.path.join(
             processed_data_path,
@@ -329,7 +371,7 @@ def main(config):
     )
 
     print(f"{continent} maritime network created successfully.")
-    
+
 if __name__ == '__main__':
     CONFIG = load_config()
     main(CONFIG)
