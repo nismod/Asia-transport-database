@@ -18,7 +18,6 @@ import networkx
 tqdm.pandas()
 
 
-
 def get_continent(x):
     if x == "AF":
         return "Africa"
@@ -110,16 +109,43 @@ def extract_subnetwork_by_cords(nodes_gdf, edges_gdf, box, name=None): # ds Help
 
     return nodes_subset, edges_subset
 
-def create_network_for_box(all_port_nodes, all_port_edges, box, output_basename, processed_data_path): # ds Select port nodes inside a box and build a subnetwork from those ports.
-    nodes_4326 = all_port_nodes.to_crs(epsg=4326)
-    (lon1, lat1), (lon2, lat2) = box
-    minx, maxx = min(lon1, lon2), max(lon1, lon2)
-    miny, maxy = min(lat1, lat2), max(lat1, lat2)
-    poly = Polygon([(minx, miny), (minx, maxy), (maxx, maxy), (maxx, miny)])
-    # Keep only port nodes inside the box, then build their network.
-    box_nodes = nodes_4326[nodes_4326.geometry.within(poly) & (nodes_4326['infra'] == 'port')]
-    port_ids = box_nodes['id'].tolist()
-    create_network_for_port_ids(all_port_nodes, all_port_edges, port_ids, output_basename, processed_data_path)
+def create_network_for_box(all_port_nodes, all_port_edges, box, output_basename, processed_data_path):
+    """
+    Build a cluster file by clipping all nodes and edges inside the box.
+    This keeps both port nodes and maritime nodes for the 3 clusters.
+    """
+    nodes_4326, edges_4326 = extract_subnetwork_by_cords(all_port_nodes, all_port_edges, box)
+
+    if nodes_4326.empty:
+        print(f"No nodes found for {output_basename}, skipping.")
+        return
+
+    out_file = f"{output_basename}_maritime_network.gpkg"
+    port_output_dir = os.path.join(processed_data_path, "infrastructure", "port")
+    os.makedirs(port_output_dir, exist_ok=True)
+
+    port_nodes = nodes_4326[nodes_4326["infra"] == "port"].copy()
+    maritime_nodes = nodes_4326[nodes_4326["infra"] == "maritime"].copy()
+
+    port_nodes.to_file(
+        os.path.join(port_output_dir, out_file),
+        layer="port_nodes",
+        driver="GPKG"
+    )
+
+    maritime_nodes.to_file(
+        os.path.join(port_output_dir, out_file),
+        layer="maritime_nodes",
+        driver="GPKG"
+    )
+
+    edges_4326.to_file(
+        os.path.join(port_output_dir, out_file),
+        layer="edges",
+        driver="GPKG"
+    )
+
+    print(f"Saved subnetwork: {out_file}")
 
 def create_network_for_port_ids(all_port_nodes, all_port_edges, port_id_list, output_basename, processed_data_path): # ds Generic builder: given a list of port ids, build the maritime subnetwork (ports + maritime nodes + connecting edges)
     if len(port_id_list) == 0:
@@ -411,11 +437,20 @@ def main(config):
     port_nodes = gpd.read_file(os.path.join(port_output_dir,
                             "global_maritime_network_PROVA_NEW1.gpkg"),layer="nodes")
 
-    port_nodes = port_nodes.loc[port_nodes["iso3"].isin(allowed_iso3)].copy()
+    print("hey infra types one")# remove later
+    print(port_nodes["infra"].value_counts())# remove later
+
+    port_nodes = port_nodes[
+    ((port_nodes["infra"] == "port") & (port_nodes["iso3"].isin(allowed_iso3)))
+    | (port_nodes["infra"] != "port")
+    ].copy() 
     port_nodes = normalize_port_nodes(port_nodes, extra_asia_iso3)
 
+    print("hey infra types two") # remove later
+    print(port_nodes["infra"].value_counts()) # remove later
+
     # Each box is ((lon1, lat1), (lon2, lat2)) in EPSG:4326
-    pacific_box = ((-180.0, -50.0), (-120.0, 15.0))         # Pacific island region 
+    pacific_box = ((-177.0, -25.0), (-150.0, 5.0))         # Pacific island region 
     northern_russia_box = ((16.0, 50.0), (90.0, 80.0))     # Northern Russia 
 
     pacific_nodes, pacific_edges = extract_subnetwork_by_cords(port_nodes, port_edges, pacific_box, name="pacific") # ds extract the Pacific box subnetwork
@@ -426,7 +461,7 @@ def main(config):
     create_network_for_box(port_nodes, port_edges, northern_russia_box, 'northern_russia_network', processed_data_path) # ds Build Northern Russia box network
 
     selected_ids = set(pacific_nodes['id']).union(set(russia_nodes['id'])) # ds large cluster: ports outside both special boxes
-    asia_port_nodes = port_nodes[(port_nodes['infra'] == 'port') & (port_nodes['continent'] == 'Asia & Pacific')]
+    asia_port_nodes = port_nodes[(port_nodes['continent'] == 'Asia & Pacific')]
     remainder_port_ids = asia_port_nodes[~asia_port_nodes['id'].isin(selected_ids)]['id'].tolist()
     create_network_for_port_ids(port_nodes, port_edges, remainder_port_ids, 'large_cluster', processed_data_path)
     # global_edges = port_edges[["from_id","to_id","id","from_infra","to_infra","geometry"]].to_crs(epsg_meters)
