@@ -18,7 +18,6 @@ import networkx
 tqdm.pandas()
 
 
-
 def get_continent(x):
     if x == "AF":
         return "Africa"
@@ -66,6 +65,26 @@ def normalize_port_nodes(nodes_gdf, extra_asia_iso3=None):
 
     return nodes_gdf
 
+
+def load_country_iso_allow_list(countries_xlsx):
+    """Load the authoritative ISO3 country workbook into a clean allow-list set."""
+    if not os.path.exists(countries_xlsx):
+        raise FileNotFoundError(f"Countries workbook not found: {countries_xlsx}")
+
+    ref_df = pd.read_excel(countries_xlsx)
+    ref_df.columns = [str(col).strip() for col in ref_df.columns]
+
+    if "Country/Territory" in ref_df.columns and "Column3" in ref_df.columns:
+        ref_df = ref_df.rename(columns={"Country/Territory": "country_name", "Column3": "iso3"})
+    elif "country" in ref_df.columns and "iso3" in ref_df.columns:
+        ref_df = ref_df.rename(columns={"country": "country_name"})
+    else:
+        ref_df = ref_df.copy()
+        ref_df.columns = ["country_name", "iso2", "iso3"]
+
+    ref_df["iso3"] = ref_df["iso3"].fillna("").astype(str).str.strip().str.upper()
+    return {iso for iso in ref_df["iso3"].tolist() if iso}
+
 # Helper: extract all nodes and edges fully contained inside a longitude/latitude box.
 def extract_subnetwork_by_cords(nodes_gdf, edges_gdf, box, name=None): # ds Helper: extract all nodes and edges fully contained inside a longitude/latitude box.
     """Return (nodes_subset, edges_subset) where nodes are inside box.
@@ -90,16 +109,43 @@ def extract_subnetwork_by_cords(nodes_gdf, edges_gdf, box, name=None): # ds Help
 
     return nodes_subset, edges_subset
 
-def create_network_for_box(all_port_nodes, all_port_edges, box, output_basename, processed_data_path): # ds Select port nodes inside a box and build a subnetwork from those ports.
-    nodes_4326 = all_port_nodes.to_crs(epsg=4326)
-    (lon1, lat1), (lon2, lat2) = box
-    minx, maxx = min(lon1, lon2), max(lon1, lon2)
-    miny, maxy = min(lat1, lat2), max(lat1, lat2)
-    poly = Polygon([(minx, miny), (minx, maxy), (maxx, maxy), (maxx, miny)])
-    # Keep only port nodes inside the box, then build their network.
-    box_nodes = nodes_4326[nodes_4326.geometry.within(poly) & (nodes_4326['infra'] == 'port')]
-    port_ids = box_nodes['id'].tolist()
-    create_network_for_port_ids(all_port_nodes, all_port_edges, port_ids, output_basename, processed_data_path)
+def create_network_for_box(all_port_nodes, all_port_edges, box, output_basename, processed_data_path):
+    """
+    Build a cluster file by clipping all nodes and edges inside the box.
+    This keeps both port nodes and maritime nodes for the 3 clusters.
+    """
+    nodes_4326, edges_4326 = extract_subnetwork_by_cords(all_port_nodes, all_port_edges, box)
+
+    if nodes_4326.empty:
+        print(f"No nodes found for {output_basename}, skipping.")
+        return
+
+    out_file = f"{output_basename}_maritime_network.gpkg"
+    port_output_dir = os.path.join(processed_data_path, "infrastructure", "port")
+    os.makedirs(port_output_dir, exist_ok=True)
+
+    port_nodes = nodes_4326[nodes_4326["infra"] == "port"].copy()
+    maritime_nodes = nodes_4326[nodes_4326["infra"] == "maritime"].copy()
+
+    port_nodes.to_file(
+        os.path.join(port_output_dir, out_file),
+        layer="port_nodes",
+        driver="GPKG"
+    )
+
+    maritime_nodes.to_file(
+        os.path.join(port_output_dir, out_file),
+        layer="maritime_nodes",
+        driver="GPKG"
+    )
+
+    edges_4326.to_file(
+        os.path.join(port_output_dir, out_file),
+        layer="edges",
+        driver="GPKG"
+    )
+
+    print(f"Saved subnetwork: {out_file}")
 
 def create_network_for_port_ids(all_port_nodes, all_port_edges, port_id_list, output_basename, processed_data_path): # ds Generic builder: given a list of port ids, build the maritime subnetwork (ports + maritime nodes + connecting edges)
     if len(port_id_list) == 0:
@@ -164,9 +210,11 @@ def create_network_for_port_ids(all_port_nodes, all_port_edges, port_id_list, ou
 
     # Save outputs
     out_file = f"{output_basename}_maritime_network.gpkg"
-    nodes_out[nodes_out['infra'] == 'port'].to_file(os.path.join(processed_data_path, 'infrastructure', out_file), layer='port_nodes', driver='GPKG')
-    nodes_out[nodes_out['infra'] == 'maritime'].to_file(os.path.join(processed_data_path, 'infrastructure', out_file), layer='maritime_nodes', driver='GPKG')
-    edges_gdf.to_file(os.path.join(processed_data_path, 'infrastructure', out_file), layer='edges', driver='GPKG')
+    port_output_dir = os.path.join(processed_data_path, 'infrastructure', 'port')
+    os.makedirs(port_output_dir, exist_ok=True)
+    nodes_out[nodes_out['infra'] == 'port'].to_file(os.path.join(port_output_dir, out_file), layer='port_nodes', driver='GPKG')
+    nodes_out[nodes_out['infra'] == 'maritime'].to_file(os.path.join(port_output_dir, out_file), layer='maritime_nodes', driver='GPKG')
+    edges_gdf.to_file(os.path.join(port_output_dir, out_file), layer='edges', driver='GPKG')
 
     print(f"Saved subnetwork: {out_file}")
 
@@ -175,7 +223,12 @@ def main(config):
     continent = "Asia & Pacific" #Asia & Pacific, Africa 
 
     incoming_data_path = config['paths']['incoming_data']
-    processed_data_path = config['paths']['data']
+    processed_data_path = config['paths']['processed_data']
+    port_output_dir = os.path.join(processed_data_path, 'infrastructure', 'port')
+    os.makedirs(port_output_dir, exist_ok=True)
+    countries_xlsx = os.path.join(incoming_data_path, "Countries_list.xlsx")
+    allowed_iso3 = load_country_iso_allow_list(countries_xlsx)
+    allowed_iso3 = allowed_iso3.union(EXTRA_ASIA_ISO3)
     
     epsg_meters = 3395 # To convert geometries to measure distances in meters
     cutoff_distance = 6600 # We assume ports within 6.6km are the same
@@ -183,6 +236,7 @@ def main(config):
     # 1. Read the previously created dataset
     df = gpd.read_file(os.path.join(processed_data_path,
                                     "infrastructure",
+                                    "port",
                                     "global_maritime_network.gpkg"),layer = 'nodes')
 
     df["country"] = df.progress_apply(lambda x:str(x["name"]).split("_")[1] if "_" in str(x["name"]) else x['name'],axis=1) # ds get the country of the port from name_country format, or use the full name if no underscore
@@ -196,6 +250,7 @@ def main(config):
 
     df_edges = gpd.read_file(os.path.join(processed_data_path,
                                     "infrastructure",
+                                    "port",
                                     "global_maritime_network.gpkg"),layer = 'edges') # ds reads all csvs and shapefiles for ports and port attributes
     
     df_new = gpd.read_file(os.path.join(incoming_data_path,
@@ -366,30 +421,36 @@ def main(config):
     # id_to_iso3 = nodes_merged.set_index("id")["iso3"]
     # port_edges["from_iso3"] = port_edges["from_id"].map(id_to_iso3)
     # port_edges["to_iso3"] = port_edges["to_id"].map(id_to_iso3)
-    port_edges.to_file(os.path.join(processed_data_path,
-                            "infrastructure",
+    port_edges.to_file(os.path.join(port_output_dir,
                             "global_maritime_network_PROVA_NEW1.gpkg"),layer="edges",driver="GPKG")
     
     
     
     nodes_merged["id"] = nodes_merged["id"].str.replace('maritime', 'maritime_')
     nodes_merged["id"] = nodes_merged["id"].str.replace('port', 'port_')
-    nodes_merged.to_file(os.path.join(processed_data_path,
-                            "infrastructure",
+    nodes_merged.to_file(os.path.join(port_output_dir,
                             "global_maritime_network_PROVA_NEW1.gpkg"),layer="nodes",driver="GPKG")
    
     
-    port_edges = gpd.read_file(os.path.join(processed_data_path,
-                            "infrastructure",
+    port_edges = gpd.read_file(os.path.join(port_output_dir,
                             "global_maritime_network_PROVA_NEW1.gpkg"),layer="edges") # ds define ports for continent of interest
-    port_nodes = gpd.read_file(os.path.join(processed_data_path,
-                            "infrastructure",
+    port_nodes = gpd.read_file(os.path.join(port_output_dir,
                             "global_maritime_network_PROVA_NEW1.gpkg"),layer="nodes")
 
+    print("hey infra types one")# remove later
+    print(port_nodes["infra"].value_counts())# remove later
+
+    port_nodes = port_nodes[
+    ((port_nodes["infra"] == "port") & (port_nodes["iso3"].isin(allowed_iso3)))
+    | (port_nodes["infra"] != "port")
+    ].copy() 
     port_nodes = normalize_port_nodes(port_nodes, extra_asia_iso3)
 
+    print("hey infra types two") # remove later
+    print(port_nodes["infra"].value_counts()) # remove later
+
     # Each box is ((lon1, lat1), (lon2, lat2)) in EPSG:4326
-    pacific_box = ((-180.0, -50.0), (-120.0, 15.0))         # Pacific island region 
+    pacific_box = ((-177.0, -25.0), (-150.0, 5.0))         # Pacific island region 
     northern_russia_box = ((16.0, 50.0), (90.0, 80.0))     # Northern Russia 
 
     pacific_nodes, pacific_edges = extract_subnetwork_by_cords(port_nodes, port_edges, pacific_box, name="pacific") # ds extract the Pacific box subnetwork
@@ -400,7 +461,7 @@ def main(config):
     create_network_for_box(port_nodes, port_edges, northern_russia_box, 'northern_russia_network', processed_data_path) # ds Build Northern Russia box network
 
     selected_ids = set(pacific_nodes['id']).union(set(russia_nodes['id'])) # ds large cluster: ports outside both special boxes
-    asia_port_nodes = port_nodes[(port_nodes['infra'] == 'port') & (port_nodes['continent'] == 'Asia & Pacific')]
+    asia_port_nodes = port_nodes[(port_nodes['continent'] == 'Asia & Pacific')]
     remainder_port_ids = asia_port_nodes[~asia_port_nodes['id'].isin(selected_ids)]['id'].tolist()
     create_network_for_port_ids(port_nodes, port_edges, remainder_port_ids, 'large_cluster', processed_data_path)
     # global_edges = port_edges[["from_id","to_id","id","from_infra","to_infra","geometry"]].to_crs(epsg_meters)
@@ -483,8 +544,7 @@ def main(config):
     # Save port nodes
     port_nodes.to_file(
         os.path.join(
-                    processed_data_path,
-                    "infrastructure",
+                    port_output_dir,
                     output_file
                 ),
         layer="port_nodes",
@@ -494,8 +554,7 @@ def main(config):
     # Save maritime nodes
     maritime_nodes.to_file(
         os.path.join(
-                    processed_data_path,
-                    "infrastructure",
+                    port_output_dir,
                     output_file
                 ),
         layer="maritime_nodes",
@@ -503,8 +562,7 @@ def main(config):
 )
     continent_edges.to_file(
         os.path.join(
-            processed_data_path,
-            "infrastructure",
+            port_output_dir,
             output_file
         ),
         layer="edges",

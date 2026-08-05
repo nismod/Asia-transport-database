@@ -95,7 +95,7 @@ def download_country_pbf(config, country_name, region="asia"):
 
 def process_country_pbf(config, country_name, tags_filter, region="asia"):
     """Download one country PBF, save it into incoming_data/osm, and convert it to parquet."""
-    processed_data_path = config['paths']['data']
+    processed_data_path = config['paths'].get('processed_data', config['paths'].get('data'))
     slug = normalize_country_slug(country_name)
     tag_label = build_tag_label(tags_filter)
 
@@ -106,7 +106,7 @@ def process_country_pbf(config, country_name, tags_filter, region="asia"):
     out_path = os.path.join(
         processed_data_path,
         "infrastructure",
-        "osm_filter",
+        "port",
         f"{tag_label}_{slug}.parquet",
     )
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
