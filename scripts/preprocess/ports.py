@@ -437,17 +437,12 @@ def main(config):
     port_nodes = gpd.read_file(os.path.join(port_output_dir,
                             "global_maritime_network_PROVA_NEW1.gpkg"),layer="nodes")
 
-    print("hey infra types one")# remove later
-    print(port_nodes["infra"].value_counts())# remove later
 
     port_nodes = port_nodes[
     ((port_nodes["infra"] == "port") & (port_nodes["iso3"].isin(allowed_iso3)))
     | (port_nodes["infra"] != "port")
     ].copy() 
     port_nodes = normalize_port_nodes(port_nodes, extra_asia_iso3)
-
-    print("hey infra types two") # remove later
-    print(port_nodes["infra"].value_counts()) # remove later
 
     # Each box is ((lon1, lat1), (lon2, lat2)) in EPSG:4326
     pacific_box = ((-177.0, -25.0), (-150.0, 5.0))         # Pacific island region 
