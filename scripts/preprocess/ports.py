@@ -33,12 +33,176 @@ def get_continent(x):
     else:
         return x
 
+EXTRA_ASIA_ISO3 = {
+    "RUS",  # Russia
+    "TUR",  # Turkey
+    "GEO",  # Georgia
+    "ARM",  # Armenia
+    "AZE",  # Azerbaijan
+    "CYP",  # Cyprus
+}
+
+
+def get_extra_asia_iso3(continent):
+    return EXTRA_ASIA_ISO3 if continent == "Asia & Pacific" else set()
+
+
+def normalize_port_nodes(nodes_gdf, extra_asia_iso3=None):
+    if "name" in nodes_gdf.columns:
+        nodes_gdf["country"] = nodes_gdf.progress_apply(
+            lambda x: str(x["name"]).split("_")[1] if "_" in str(x["name"]) else x["name"],
+            axis=1,
+        )
+        nodes_gdf["name"] = nodes_gdf.progress_apply(
+            lambda x: str(x["name"]).split("_")[0] if "_" in str(x["name"]) else x["name"],
+            axis=1,
+        )
+
+    if "Continent_Code" in nodes_gdf.columns:
+        nodes_gdf["continent"] = nodes_gdf["Continent_Code"].progress_apply(get_continent)
+
+    if extra_asia_iso3 is not None:
+        nodes_gdf.loc[nodes_gdf["iso3"].isin(extra_asia_iso3), "continent"] = "Asia & Pacific"
+
+    return nodes_gdf
+
+
+def load_country_iso_allow_list(countries_xlsx):
+    """Load the authoritative ISO3 country workbook into a clean allow-list set."""
+    if not os.path.exists(countries_xlsx):
+        raise FileNotFoundError(f"Countries workbook not found: {countries_xlsx}")
+
+    ref_df = pd.read_excel(countries_xlsx)
+    ref_df.columns = [str(col).strip() for col in ref_df.columns]
+
+    if "Country/Territory" in ref_df.columns and "Column3" in ref_df.columns:
+        ref_df = ref_df.rename(columns={"Country/Territory": "country_name", "Column3": "iso3"})
+    elif "country" in ref_df.columns and "iso3" in ref_df.columns:
+        ref_df = ref_df.rename(columns={"country": "country_name"})
+    else:
+        ref_df = ref_df.copy()
+        ref_df.columns = ["country_name", "iso2", "iso3"]
+
+    ref_df["iso3"] = ref_df["iso3"].fillna("").astype(str).str.strip().str.upper()
+    return {iso for iso in ref_df["iso3"].tolist() if iso}
+
+# Helper: extract all nodes and edges fully contained inside a longitude/latitude box.
+def extract_subnetwork_by_cords(nodes_gdf, edges_gdf, box, name=None): # ds Helper: extract all nodes and edges fully contained inside a longitude/latitude box.
+    """Return (nodes_subset, edges_subset) where nodes are inside box.
+
+    box: ((lon1, lat1), (lon2, lat2)) - two opposite corners in 4326 coordinates
+    name: optional string used when saving
+    """
+    # ensure CRS
+    nodes_4326 = nodes_gdf.to_crs(epsg=4326)
+    edges_4326 = edges_gdf.to_crs(epsg=4326)
+
+    (lon1, lat1), (lon2, lat2) = box
+    minx, maxx = min(lon1, lon2), max(lon1, lon2) # ds find the bottom left and top right corners of the box by taking the min and max of the longitude and latitude values
+    miny, maxy = min(lat1, lat2), max(lat1, lat2)
+
+    poly = Polygon([(minx, miny), (minx, maxy), (maxx, maxy), (maxx, miny)]) # ds creates a rectangle from the min and max coordinates
+
+    nodes_subset = nodes_4326[nodes_4326.geometry.within(poly)].copy() # ds selects nodes that are only within the box boundary
+    node_ids = set(nodes_subset["id"].values.tolist()) # ds creates a set of the IDs of the nodes within the box
+
+    edges_subset = edges_4326[edges_4326["from_id"].isin(node_ids) & edges_4326["to_id"].isin(node_ids)].copy() # ds selects edges that are only between nodes within the box
+
+    return nodes_subset, edges_subset
+
+def create_network_for_box(all_port_nodes, all_port_edges, box, output_basename, processed_data_path): # ds Select port nodes inside a box and build a subnetwork from those ports.
+    nodes_4326 = all_port_nodes.to_crs(epsg=4326)
+    (lon1, lat1), (lon2, lat2) = box
+    minx, maxx = min(lon1, lon2), max(lon1, lon2)
+    miny, maxy = min(lat1, lat2), max(lat1, lat2)
+    poly = Polygon([(minx, miny), (minx, maxy), (maxx, maxy), (maxx, miny)])
+    # Keep only port nodes inside the box, then build their network.
+    box_nodes = nodes_4326[nodes_4326.geometry.within(poly) & (nodes_4326['infra'] == 'port')]
+    port_ids = box_nodes['id'].tolist()
+    create_network_for_port_ids(all_port_nodes, all_port_edges, port_ids, output_basename, processed_data_path)
+
+def create_network_for_port_ids(all_port_nodes, all_port_edges, port_id_list, output_basename, processed_data_path): # ds Generic builder: given a list of port ids, build the maritime subnetwork (ports + maritime nodes + connecting edges)
+    if len(port_id_list) == 0:
+        print(f"No ports found for {output_basename}, skipping.")
+        return
+
+    global_edges = all_port_edges[["from_id", "to_id", "id", "distance"]] # ds extract relevant edge columns
+    G_full = ig.Graph.TupleList(global_edges.itertuples(index=False), edge_attrs=list(global_edges.columns)[2:]) # ds turn edge table into a graph
+
+    # Ensure ports with no edge incident still exist as vertices in the graph
+    existing_vertices = set(G_full.vs["name"])
+    missing_vertices = [pid for pid in port_id_list if pid not in existing_vertices]
+    if missing_vertices:
+        G_full.add_vertices(missing_vertices)
+
+    all_edges = []
+    ports_list = [p for p in port_id_list]
+    
+    for o in range(len(ports_list) - 1): #ds iterates through the list of port IDs in the continent of interest, except for the last one (since it will be the origin for the last iteration)
+        origin = ports_list[o]
+        destinations = ports_list[o+1:] #ds  means onwards from that number
+        e, _ = network_od_path_estimations(G_full, origin, destinations, "distance", "id")
+        all_edges += e
+
+    all_edges = list(set([item for sublist in all_edges for item in sublist])) #de  removes repeated items
+    all_edges = list(set(all_edges))
+
+    # Make the route edges bidirectional by duplicating each pair in reverse order.
+    edges_subset = all_port_edges[all_port_edges["id"].isin(all_edges)][["from_id", "to_id"]] # de only keeps ids that are in all edges
+    dup_df = edges_subset.copy()
+    dup_df[["from_id", "to_id"]] = dup_df[["to_id", "from_id"]]
+    edges_dual = pd.concat([edges_subset, dup_df], axis=0, ignore_index=True)
+    edges_dual = edges_dual.drop_duplicates(subset=["from_id", "to_id"], keep="first")
+
+    edges_gdf = gpd.GeoDataFrame(
+        pd.merge(edges_dual, all_port_edges, how="left", on=["from_id", "to_id"]),
+        geometry="geometry",
+        crs="EPSG:4326",
+    )
+
+    node_ids = list(set(edges_gdf["from_id"].tolist() + edges_gdf["to_id"].tolist()))
+    nodes_gdf = all_port_nodes[all_port_nodes["id"].isin(node_ids)].copy()
+
+    # Normalize column names like earlier
+    nodes_out = nodes_gdf[['id', 'name', 'fullname', 'infra', 'country', 'iso3',
+        'vessel_cou', 'vessel_c_1', 'vessel_c_2', 'vessel_c_3', 'vessel_c_4',
+        'vessel_c_5', 'industry_t', 'industry_1', 'industry_2', 'share_coun',
+        'share_co_1', 'call_container', 'call_drybulk', 'call_generalcargo', 'call_roro',
+        'call_tanker', 'capacity_container', 'capacity_drybulk',
+        'capacity_generalcargo', 'capacity_roro', 'capacity_tanker',
+        'time_container', 'time_drybulk', 'time_generalcargo', 'time_roro',
+        'time_tanker', 'geometry']]
+
+    nodes_out = nodes_out.rename(columns={"vessel_cou": "vessel_count_total","vessel_c_1": "vessel_count_container","vessel_c_2": "vessel_count_drybulk",
+                                                "vessel_c_3": "vessel_count_generalcargo","vessel_c_4": "vessel_count_roro","vessel_c_5": "vessel_count_tanker",
+                                                "industry_t": "industry_top1","industry_1": "industry_top2","industry_2": "industry_top3",
+                                                "share_coun": "share_country_maritime_import","share_co_1": "share_country_maritime_export",
+                                            'capacity_container':'capacity_container_tons', 'capacity_drybulk': 'capacity_drybulk_tons',
+                                        'capacity_generalcargo':'capacity_generalcargo_tons', 'capacity_roro':'capacity_roro_tons', 
+                                        'capacity_tanker':'capacity_tanker_tons', 'time_container':'time_container_h', 'time_drybulk':'time_drybulk_h', 
+                                        'time_generalcargo':'time_generalcargo_h', 'time_roro':'time_roro_h','time_tanker':'time_tanker_h'})
+
+    # Save outputs
+    out_file = f"{output_basename}_maritime_network.gpkg"
+    port_output_dir = os.path.join(processed_data_path, 'infrastructure', 'port')
+    os.makedirs(port_output_dir, exist_ok=True)
+    nodes_out[nodes_out['infra'] == 'port'].to_file(os.path.join(port_output_dir, out_file), layer='port_nodes', driver='GPKG')
+    nodes_out[nodes_out['infra'] == 'maritime'].to_file(os.path.join(port_output_dir, out_file), layer='maritime_nodes', driver='GPKG')
+    edges_gdf.to_file(os.path.join(port_output_dir, out_file), layer='edges', driver='GPKG')
+
+    print(f"Saved subnetwork: {out_file}")
+
 def main(config):
 
     continent = "Asia & Pacific" #Asia & Pacific, Africa 
 
     incoming_data_path = config['paths']['incoming_data']
     processed_data_path = config['paths']['processed_data']
+    port_output_dir = os.path.join(processed_data_path, 'infrastructure', 'port')
+    os.makedirs(port_output_dir, exist_ok=True)
+    countries_xlsx = os.path.join(incoming_data_path, "Countries_list.xlsx")
+    allowed_iso3 = load_country_iso_allow_list(countries_xlsx)
+    allowed_iso3 = allowed_iso3.union(EXTRA_ASIA_ISO3)
     
     epsg_meters = 3395 # To convert geometries to measure distances in meters
     cutoff_distance = 6600 # We assume ports within 6.6km are the same
@@ -49,32 +213,19 @@ def main(config):
                                     "port",
                                     "global_maritime_network.gpkg"),layer = 'nodes')
 
-    # ds Inputs: df (loaded above); x is a temporary variable representing each row of df.
-    # ds Output: df with a new "country" column. (same for name and continent)
-    df["country"] = df.progress_apply(lambda x:str(x["name"]).split("_")[1] if "_" in str(x["name"]) else x['name'],axis=1) # ds gets the country of the port, some naming system has city_country, so it splits on the underscore and takes the second part as the country, if there is no underscore, it just takes the name as the country
-    df["name"] = df.progress_apply(lambda x:str(x["name"]).split("_")[0] if "_" in str(x["name"]) else x['name'],axis=1) #ds gets the name of the port, some naming system has city_country, so it splits on the underscore and takes the first part as the name, if there is no underscore, it just takes the name as the name
+    df["country"] = df.progress_apply(lambda x:str(x["name"]).split("_")[1] if "_" in str(x["name"]) else x['name'],axis=1) # ds get the country of the port from name_country format, or use the full name if no underscore
+    df["name"] = df.progress_apply(lambda x:str(x["name"]).split("_")[0] if "_" in str(x["name"]) else x['name'],axis=1) # ds get the port name from name_country format, or use the original name if no underscore
     #df["continent"] = df["Continent_Code"].progress_apply(lambda x: get_continent(x))
 
     df["continent"] = df["Continent_Code"].progress_apply(get_continent)
 
-    if continent == "Asia & Pacific":
+    extra_asia_iso3 = get_extra_asia_iso3(continent)
+    df.loc[df["iso3"].isin(extra_asia_iso3), "continent"] = "Asia & Pacific"
 
-        extra_asia_iso3 = {
-            "RUS",  # Russia
-            "TUR",  # Turkey
-            "GEO",  # Georgia
-            "ARM",  # Armenia
-            "AZE",  # Azerbaijan
-            "CYP",  # Cyprus
-        }
-
-        df.loc[df["iso3"].isin(extra_asia_iso3), "continent"] = "Asia & Pacific"
-    
-    #ds reads all cvs and shapefiles for ports and port attributes
     df_edges = gpd.read_file(os.path.join(processed_data_path,
                                     "infrastructure",
                                     "port",
-                                    "global_maritime_network.gpkg"),layer = 'edges') 
+                                    "global_maritime_network.gpkg"),layer = 'edges') # ds reads all csvs and shapefiles for ports and port attributes
     
     df_new = gpd.read_file(os.path.join(incoming_data_path,
                                     "Global port supply-chains",
@@ -244,33 +395,43 @@ def main(config):
     # id_to_iso3 = nodes_merged.set_index("id")["iso3"]
     # port_edges["from_iso3"] = port_edges["from_id"].map(id_to_iso3)
     # port_edges["to_iso3"] = port_edges["to_id"].map(id_to_iso3)
-    port_edges.to_file(os.path.join(processed_data_path,
-                            "infrastructure",
-                            "port",
+    port_edges.to_file(os.path.join(port_output_dir,
                             "global_maritime_network_PROVA_NEW1.gpkg"),layer="edges",driver="GPKG")
     
     
     
     nodes_merged["id"] = nodes_merged["id"].str.replace('maritime', 'maritime_')
     nodes_merged["id"] = nodes_merged["id"].str.replace('port', 'port_')
-    nodes_merged.to_file(os.path.join(processed_data_path,
-                            "infrastructure",
-                            "port",
+    nodes_merged.to_file(os.path.join(port_output_dir,
                             "global_maritime_network_PROVA_NEW1.gpkg"),layer="nodes",driver="GPKG")
    
     
-    # Get the ports for continent of intrest
-    
-    port_edges = gpd.read_file(os.path.join(processed_data_path,
-                            "infrastructure",
-                            "port",
-                            "global_maritime_network_PROVA_NEW1.gpkg"),layer="edges")
-    port_nodes = gpd.read_file(os.path.join(processed_data_path,
-                            "infrastructure",
-                            "port",
+    port_edges = gpd.read_file(os.path.join(port_output_dir,
+                            "global_maritime_network_PROVA_NEW1.gpkg"),layer="edges") # ds define ports for continent of interest
+    port_nodes = gpd.read_file(os.path.join(port_output_dir,
                             "global_maritime_network_PROVA_NEW1.gpkg"),layer="nodes")
+
+    port_nodes = port_nodes.loc[port_nodes["iso3"].isin(allowed_iso3)].copy()
+    port_nodes = normalize_port_nodes(port_nodes, extra_asia_iso3)
+
+    # Each box is ((lon1, lat1), (lon2, lat2)) in EPSG:4326
+    pacific_box = ((-180.0, -50.0), (-120.0, 15.0))         # Pacific island region 
+    northern_russia_box = ((16.0, 50.0), (90.0, 80.0))     # Northern Russia 
+
+    pacific_nodes, pacific_edges = extract_subnetwork_by_cords(port_nodes, port_edges, pacific_box, name="pacific") # ds extract the Pacific box subnetwork
+    russia_nodes, russia_edges = extract_subnetwork_by_cords(port_nodes, port_edges, northern_russia_box, name="northern_russia") # ds extract the Northern Russia box subnetwork
+
+
+    create_network_for_box(port_nodes, port_edges, pacific_box, 'pacific_network', processed_data_path) # ds Build Pacific box network
+    create_network_for_box(port_nodes, port_edges, northern_russia_box, 'northern_russia_network', processed_data_path) # ds Build Northern Russia box network
+
+    selected_ids = set(pacific_nodes['id']).union(set(russia_nodes['id'])) # ds large cluster: ports outside both special boxes
+    asia_port_nodes = port_nodes[(port_nodes['infra'] == 'port') & (port_nodes['continent'] == 'Asia & Pacific')]
+    remainder_port_ids = asia_port_nodes[~asia_port_nodes['id'].isin(selected_ids)]['id'].tolist()
+    create_network_for_port_ids(port_nodes, port_edges, remainder_port_ids, 'large_cluster', processed_data_path)
     # global_edges = port_edges[["from_id","to_id","id","from_infra","to_infra","geometry"]].to_crs(epsg_meters)
     # global_edges["distance"] = global_edges.geometry.length
+
     global_edges = port_edges[["from_id","to_id","id","distance"]]
     continent_ports = port_nodes[port_nodes["continent"] == continent]
     G = ig.Graph.TupleList(global_edges.itertuples(index=False), edge_attrs=list(global_edges.columns)[2:]) #ds creates a graph from the edges dataframe, where each row is a tuple of (from_id, to_id, id, distance)
@@ -298,7 +459,7 @@ def main(config):
                                 continent_edges,port_edges,
                                 how="left",on=["from_id","to_id"]
                                 ),
-                        geometry="geometry",crs="EPSG:4326") #ds merges the edges
+                        geometry="geometry",crs="EPSG:3395") #ds merges the edges
     
     all_nodes = list(set(continent_edges["from_id"].values.tolist() + continent_edges["to_id"].values.tolist()))
     continent_nodes = port_nodes[port_nodes["id"].isin(all_nodes)]
@@ -348,9 +509,7 @@ def main(config):
     # Save port nodes
     port_nodes.to_file(
         os.path.join(
-                    processed_data_path,
-                    "infrastructure",
-                    "port",
+                    port_output_dir,
                     output_file
                 ),
         layer="port_nodes",
@@ -360,9 +519,7 @@ def main(config):
     # Save maritime nodes
     maritime_nodes.to_file(
         os.path.join(
-                    processed_data_path,
-                    "infrastructure",
-                    "port",
+                    port_output_dir,
                     output_file
                 ),
         layer="maritime_nodes",
@@ -370,9 +527,7 @@ def main(config):
 )
     continent_edges.to_file(
         os.path.join(
-            processed_data_path,
-            "infrastructure",
-            "port",
+            port_output_dir,
             output_file
         ),
         layer="edges",
