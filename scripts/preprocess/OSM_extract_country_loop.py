@@ -95,7 +95,7 @@ def download_country_pbf(config, country_name, region):
 
 def process_country_pbf(config, country_name, tags_filter, region):
     """Download one country PBF, save it into incoming_data/osm, and convert it to parquet."""
-    processed_data_path = config['paths'].get('processed_data', config['paths'].get('data'))
+    processed_data_path = config["paths"]["processed_data"]
     slug = normalize_country_slug(country_name)
     tag_label = build_tag_label(tags_filter)
 
@@ -183,7 +183,7 @@ def combine_country_parquets(config, tags_filter):
 def main(config):
     """Loop through a supplied country list, falling back to the workbook if needed."""
 
-    countries = ["vietnam","afghanistan"]
+    countries = None
     tags_filter = {
         "aeroway": ["aerodrome"]
     }
@@ -216,7 +216,7 @@ def main(config):
 def main_single_file(config, osm_name, tags_filter, output_name):
     """Keep the old single-file behaviour available for one-off manual runs."""
     incoming_data_path = config['paths']['incoming_data']
-    processed_data_path = config['paths']['data']
+    processed_data_path = config["paths"]["processed_data"]
     in_path = os.path.join(incoming_data_path, "osm", osm_name + ".osm.pbf")
     out_path = os.path.join(processed_data_path, "infrastructure", output_name + ".parquet")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
