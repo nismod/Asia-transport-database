@@ -13,6 +13,7 @@ from tqdm import tqdm
 tqdm.pandas()
 #from pyrosm import OSM # ds package wasnt working locally for me, so commented out temparorarily
 import quackosm as qo
+import shutil
 
 def load_config():
     script_dir = os.path.dirname(os.path.abspath(__file__)) # ds extract the directory of the current script (removing the filename)
@@ -138,9 +139,25 @@ def process_country_pbf(config, country_name, tags_filter, region):
 
     return out_path
 
+def write_tag_summary(processed_data_path, tag_labels):
+    """Write the list of tag labels used in this run."""
+    summary_path = os.path.join(
+        processed_data_path,
+        "infrastructure",
+        "osm_filter",
+        "tags_used.txt",
+    )
+    os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+
+    with open(summary_path, "w", encoding="utf-8") as fh:
+        for tag_label in tag_labels:
+            fh.write(f"{tag_label}\n")
+
+    print(f"Saved tag summary to {summary_path}")
+
+
 def combine_country_parquets(config, tags_filter):
     """Combine all country parquet files for one tag into a single continent-wide file."""
-
     processed_data_path = config["paths"]["processed_data"]
     tag_label = build_tag_label(tags_filter)
 
@@ -151,12 +168,15 @@ def combine_country_parquets(config, tags_filter):
         tag_label,
     )
 
+    # ds create the tag directory if it does not already exist
+    os.makedirs(input_dir, exist_ok=True)
+
+    combined_name = f"{tag_label}_asia_pacific.parquet"
+
     parquet_files = sorted(
-        [
-            os.path.join(input_dir, f)
-            for f in os.listdir(input_dir)
-            if f.endswith(".parquet")
-        ]
+        os.path.join(input_dir, f)
+        for f in os.listdir(input_dir)
+        if f.endswith(".parquet") and f != combined_name
     )
 
     if not parquet_files:
@@ -171,11 +191,7 @@ def combine_country_parquets(config, tags_filter):
         crs=gdfs[0].crs,
     )
 
-    output_path = os.path.join(
-        input_dir,
-        f"{tag_label}_asia_pacific.parquet",
-    )
-
+    output_path = os.path.join(input_dir, combined_name)
     combined.to_parquet(output_path)
 
     print(f"Saved combined parquet to {output_path}")
@@ -184,32 +200,68 @@ def main(config):
     """Loop through a supplied country list, falling back to the workbook if needed."""
 
     countries = None
-    tags_filter = {
-        "aeroway": ["aerodrome"]
-    }
+
+    # ds list of OSM tag filters to extract (each tag is processed separately)
+    tag_filters = [
+        {"aeroway": ["aerodrome"]},
+        {"aeroway": ["terminal"]},
+        {"aeroway": ["runway"]},
+        {"aeroway": ["taxiway"]},
+        
+    ]
 
     if countries is None:
         countries = load_country_records(config)
 
-    for country_record in tqdm(countries):
-        if isinstance(country_record, dict):
-            country_name = str(country_record.get("country_name", "")).strip() # ds get the country name from the record, if it is not present, use an empty string
-            region = str(country_record.get("region", "asia")).strip() or "asia" # ds get the region from the record, if it is not present, use "asia" as the default
-        else:
-            country_name = str(country_record).strip()
-            region = "asia"
+    # ds loop through each tag filter separately so each tag has its own output folder
+    for tags_filter in tag_filters:
 
-        if not country_name:
-            continue
+        tag_label = build_tag_label(tags_filter)
 
-        process_country_pbf(
-            config=config,
-            country_name=country_name,
-            tags_filter=tags_filter,
-            region=region,
+        tag_output_dir = os.path.join(
+            config["paths"]["processed_data"],
+            "infrastructure",
+            "osm_filter",
+            tag_label,
         )
 
-    combine_country_parquets(config, tags_filter)
+        # ds delete the old output folder for this tag if it already exists
+        if os.path.exists(tag_output_dir):
+            shutil.rmtree(tag_output_dir)
+
+        # ds create a new empty output folder for this tag
+        os.makedirs(tag_output_dir, exist_ok=True)
+
+        # ds loop through all countries for the current tag
+        for country_record in tqdm(
+            countries,
+            desc=f"Country OSM extracts ({tag_label})"
+        ):
+            if isinstance(country_record, dict):
+                country_name = str(
+                    country_record.get("country_name", "")
+                ).strip() # ds get the country name from the record, if it is not present, use an empty string
+
+                region = str(
+                    country_record.get("region", "asia")
+                ).strip() or "asia" # ds get the region from the record, if it is not present, use "asia" as the default
+
+            else:
+                country_name = str(country_record).strip()
+                region = "asia"
+
+            if not country_name:
+                continue
+
+            process_country_pbf(
+                config=config,
+                country_name=country_name,
+                tags_filter=tags_filter,
+                region=region,
+            )
+
+        # ds combine all country parquet files for the current tag
+        combine_country_parquets(config, tags_filter)
 
 
 ## same function expect does not loop thorugh multiple countires 
