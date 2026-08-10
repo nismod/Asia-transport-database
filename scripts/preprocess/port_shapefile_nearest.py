@@ -193,13 +193,18 @@ def main(config):
 
     landuse_gpkg = os.path.join(incoming_data_path, "infrastructure", "Port", "port_landuse.gpkg")
     countries_xlsx = os.path.join(incoming_data_path, "Countries_list.xlsx")
-    network_gpkg = os.path.join(processed_data_path, "infrastructure", "global_maritime_network_PROVA_NEW1.gpkg")
+    network_gpkg = os.path.join(
+    processed_data_path,
+    "infrastructure",
+    "port",
+    "asia_pacific_maritime_network_PROVA_NEW1.gpkg"
+)
 
-    output_dir = os.path.join(processed_data_path, "infrastructure")
+    output_dir = os.path.join(processed_data_path, "infrastructure","port")
     os.makedirs(output_dir, exist_ok=True) #ds create directories if they do not exist already
 
     landuse_gdf = gpd.read_file(landuse_gpkg)
-    network_ports = gpd.read_file(network_gpkg, layer="nodes")
+    network_ports = gpd.read_file(network_gpkg, layer="port_nodes")
 
     # Load country ISO reference list.
     country_ref, country_lookup, allowed_iso3 = load_country_iso_allow_list(countries_xlsx)
@@ -224,26 +229,155 @@ def main(config):
     # Keep a tidy export that contains every landuse row and its nearest port id.
     lookup_export = nearest[
         [
-            "port_name",
-            "country",
-            "continent",
-            "area",
-            "type",
-            "sector",
-            "land_use",
-            "nearest_port_id",
-            "nearest_port_name",
-            "nearest_port_country",
-            "nearest_port_iso3",
-            "distance_m",
+            "port_name", #from land_use
+            "country", #from land use
+            "continent", #from land use
+            "area", #from land use
+            "type", #from land_use
+            "sector", #from land_use
+            "land_use", #from land_use
+            "nearest_port_id", # from maritime_nerwork_new1.gpkg
+            "nearest_port_name", # from maritime_nerwork_new1.gpkg  
+            "nearest_port_country", 
+            "nearest_port_iso3", 
+            "distance_m", # calculated, distance between port and node
         ]
     ].copy()
 
     output_landuse = os.path.join(output_dir, "port_landuse_nearest_port_ids.gpkg")
     nearest.to_file(output_landuse, layer="port_landuse", driver="GPKG")
 
-    lookup_csv = os.path.join(output_dir, "port_landuse_nearest_port_id_lookup.csv")
-    lookup_export.to_csv(lookup_csv, index=False)
+    # Build a node polygon audit sheet.
+    # If your polygon layer uses a different linking field, change polygon_node_id_col above.
+    polygon_counts = (
+        nearest.groupby("nearest_port_id")
+        .size()
+        .reset_index(name="polygon_count")
+    )
+
+    node_polygon_audit = network_ports[
+        ["id", "name", "infra", "country", "iso3"]
+    ].copy()
+
+    node_polygon_audit = node_polygon_audit.merge(
+        polygon_counts,
+        left_on="id",
+        right_on="nearest_port_id",
+        how="left"
+    )
+
+    node_polygon_audit["polygon_count"] = node_polygon_audit["polygon_count"].fillna(0).astype(int)
+    node_polygon_audit["missing_polygon_data"] = node_polygon_audit["polygon_count"] == 0
+    node_polygon_audit.drop(columns=["nearest_port_id"], inplace=True, errors="ignore")
+
+    # Save everything into one Excel workbook with separate sheets.
+    lookup_xlsx = os.path.join(output_dir, "port_landuse_nearest_port_id_lookup.xlsx")
+
+    summary_sheet = pd.DataFrame({
+        "metric": [
+            "total_records",
+            "matched_records",
+            "unmatched_records",
+            "nodes_total",
+            "nodes_missing_polygon_data",
+            "nodes_with_polygons",
+        ],
+        "value": [
+            len(lookup_export),
+            int(lookup_export["nearest_port_id"].notna().sum()),
+            int(lookup_export["nearest_port_id"].isna().sum()),
+            len(node_polygon_audit),
+            int(node_polygon_audit["missing_polygon_data"].sum()),
+            int((node_polygon_audit["polygon_count"] > 0).sum()),
+        ]
+    })
+
+    with pd.ExcelWriter(lookup_xlsx, engine="openpyxl") as writer:
+        lookup_export.to_excel(writer, sheet_name="lookup", index=False)
+        node_polygon_audit.to_excel(writer, sheet_name="node_polygon_audit", index=False)
+        summary_sheet.to_excel(writer, sheet_name="summary", index=False)
+
+        ws = writer.book["lookup"]
+
+        from openpyxl.styles import PatternFill
+
+        green_fill = PatternFill(fill_type="solid", fgColor="C6EFCE")
+        red_fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
+
+        header_map = {cell.value: cell.column for cell in ws[1]}
+        port_col = header_map["port_name"]
+        nearest_col = header_map["nearest_port_name"]
+
+        for row in range(2, ws.max_row + 1):
+            port_value = ws.cell(row=row, column=port_col).value
+            nearest_value = ws.cell(row=row, column=nearest_col).value
+
+            port_value = "" if port_value is None else str(port_value).strip()
+            nearest_value = "" if nearest_value is None else str(nearest_value).strip()
+
+            cell = ws.cell(row=row, column=nearest_col)
+
+            if port_value == nearest_value:
+                cell.fill = green_fill
+            else:
+                cell.fill = red_fill
+
+        ws.freeze_panes = "A2"
+        # Add conditional formatting to the node_polygon_audit sheet.
+    audit_ws = writer.book["node_polygon_audit"]
+
+    from openpyxl.styles import PatternFill
+
+    green_fill = PatternFill(fill_type="solid", fgColor="C6EFCE")
+    red_fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
+
+    audit_header_map = {cell.value: cell.column for cell in audit_ws[1]}
+    missing_col = audit_header_map["missing_polygon_data"]
+
+    for row in range(2, audit_ws.max_row + 1):
+        cell = audit_ws.cell(row=row, column=missing_col)
+
+        if cell.value is True:
+            cell.fill = red_fill
+        else:
+            cell.fill = green_fill
+
+    audit_ws.freeze_panes = "A2"
+    from openpyxl.styles import PatternFill
+
+    from openpyxl.styles import PatternFill
+
+    with pd.ExcelWriter(lookup_xlsx, engine="openpyxl") as writer:
+        lookup_export.to_excel(writer, sheet_name="lookup", index=False)
+        node_polygon_audit.to_excel(writer, sheet_name="node_polygon_audit", index=False)
+        summary_sheet.to_excel(writer, sheet_name="summary", index=False)
+
+        ws = writer.book["lookup"]
+
+        green_fill = PatternFill(fill_type="solid", fgColor="C6EFCE")
+        red_fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
+
+        # Get header positions
+        headers = {ws.cell(row=1, column=c).value: c for c in range(1, ws.max_column + 1)}
+        country_col = headers["country"]
+        nearest_country_col = headers["nearest_port_country"]
+
+        # Color the whole row based on whether country matches nearest_port_country
+        for row in range(2, ws.max_row + 1):
+            country_value = ws.cell(row=row, column=country_col).value
+            nearest_country_value = ws.cell(row=row, column=nearest_country_col).value
+
+            country_value = "" if country_value is None else str(country_value).strip()
+            nearest_country_value = "" if nearest_country_value is None else str(nearest_country_value).strip()
+
+            fill = green_fill if country_value == nearest_country_value else red_fill
+
+            for col in range(1, ws.max_column + 1):
+                ws.cell(row=row, column=col).fill = fill
+
+        ws.freeze_panes = "A2"
+
+
 
     unmatched_count = lookup_export["nearest_port_id"].isna().sum()
     matched_count = len(lookup_export) - unmatched_count
@@ -252,9 +386,9 @@ def main(config):
     print(f"Nearest-port matches kept: {matched_count}")
     print(f"Nearest-port unmatched records: {unmatched_count}")
     print(f"Saved enriched landuse layer to: {output_landuse}")
-    print(f"Saved spreadsheet lookup to: {lookup_csv}")
+    print(f"Saved spreadsheet lookup to: {lookup_xlsx}")
 
-    return nearest, lookup_export
+    return nearest, lookup_export, node_polygon_audit
 
 
 if __name__ == "__main__":

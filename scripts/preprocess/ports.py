@@ -48,8 +48,9 @@ def get_extra_asia_iso3(continent):
 
 def normalize_port_nodes(nodes_gdf, extra_asia_iso3=None):
     if "name" in nodes_gdf.columns:
-        nodes_gdf["country"] = nodes_gdf.progress_apply(
-            lambda x: str(x["name"]).split("_")[1] if "_" in str(x["name"]) else x["name"],
+        # keep the existing country column unchanged
+        nodes_gdf["name"] = nodes_gdf.progress_apply(
+            lambda x: str(x["name"]).split("_")[0] if "_" in str(x["name"]) else x["name"],
             axis=1,
         )
         nodes_gdf["name"] = nodes_gdf.progress_apply(
@@ -239,7 +240,11 @@ def main(config):
                                     "port",
                                     "global_maritime_network.gpkg"),layer = 'nodes')
 
-    df["country"] = df.progress_apply(lambda x:str(x["name"]).split("_")[1] if "_" in str(x["name"]) else x['name'],axis=1) # ds get the country of the port from name_country format, or use the full name if no underscore
+    # keep country as it already is
+    df["name"] = df.progress_apply(
+        lambda x: str(x["name"]).split("_")[0] if "_" in str(x["name"]) else x["name"],
+        axis=1
+    )   # ds get the country of the port from name_country format, or use the full name if no underscore
     df["name"] = df.progress_apply(lambda x:str(x["name"]).split("_")[0] if "_" in str(x["name"]) else x['name'],axis=1) # ds get the port name from name_country format, or use the original name if no underscore
     #df["continent"] = df["Continent_Code"].progress_apply(lambda x: get_continent(x))
 
@@ -261,22 +266,22 @@ def main(config):
     maritime_values_calls = pd.read_csv(os.path.join(
         incoming_data_path,
         "Global port supply-chains",
-        "Ports Updated 2025",
-        "port_calls_average_2019-2024.csv"
+        "Ports Updated 2026",
+        "port_calls_average_2023-2025.csv"
     )).drop(columns=["country", "ISO3"], errors="ignore")
 
     maritime_values_cap = pd.read_csv(os.path.join(
         incoming_data_path,
         "Global port supply-chains",
-        "Ports Updated 2025",
-        "port_capacity_called_average_2019-2024.csv"
+        "Ports Updated 2026",
+        "port_capacity_called_average_2023-2025.csv"
     )).drop(columns=["country", "ISO3"], errors="ignore")
 
     maritime_values_turn = pd.read_csv(os.path.join(
         incoming_data_path,
         "Global port supply-chains",
-        "Ports Updated 2025",
-        "port_turn_around_time_average_2019-2024.csv"
+        "Ports Updated 2026",
+        "port_turn_around_time_average_2023-2025.csv"
     )).drop(columns=["country", "ISO3"], errors="ignore")
 
     merged_gdf = df_new.merge(maritime_values_calls, on='portid', how='left', suffixes=('', '_csv')) # ds extracting all the ports present in portwatch data
@@ -318,7 +323,7 @@ def main(config):
     nodes_merged["infra_left"] = nodes_merged["infra_left"].fillna(nodes_merged["infra_right"])
     nodes_merged["infra_left"] = nodes_merged["infra_left"].fillna(nodes_merged["infra"])
     nodes_merged["iso3_left"] = nodes_merged["iso3_left"].fillna(nodes_merged["iso3_right"])
-    nodes_merged["country_left"] = nodes_merged["country_left"].fillna(nodes_merged["country_right"])
+    #nodes_merged["country_left"] = nodes_merged["country_left"].fillna(nodes_merged["country_right"])
     nodes_merged["continent_left"] = nodes_merged["continent_left"].fillna(nodes_merged["continent_right"])
     nodes_merged["portname"] = nodes_merged["portname"].fillna(nodes_merged["name"])
     nodes_merged["portid"] = nodes_merged["portid"].fillna(nodes_merged["id"])
@@ -519,7 +524,12 @@ def main(config):
                                                 'time_generalcargo':'time_generalcargo_h', 'time_roro':'time_roro_h','time_tanker':'time_tanker_h'})   
 
     # Output filename for the selected continent
-    output_file = f"{continent.lower()}_maritime_network_PROVA_NEW1.gpkg"
+    if continent == "Asia & Pacific":
+        continent_file_name = "asia_pacific"
+    else:
+        continent_file_name = continent.lower().replace(" ", "_")
+
+    output_file = f"{continent_file_name}_maritime_network_PROVA_NEW1.gpkg"
     '''
     continent_nodes.to_file(
         os.path.join(
