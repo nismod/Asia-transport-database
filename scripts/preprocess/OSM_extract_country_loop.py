@@ -121,14 +121,38 @@ def process_country_pbf(config, country_name, tags_filter, region):
     old_cwd = os.getcwd()
     os.chdir(temp_work_dir)
 
-    # end of code storage issues on ARC
     try:
         qo.convert_pbf_to_parquet(
             pbf_path=in_path,
             result_file_path=out_path,
             tags_filter=tags_filter,
-            explode_tags=False,
+            keep_all_tags=True,
+            explode_tags=True,
         )
+
+        # Read the extracted OSM data
+        gdf = gpd.read_parquet(out_path)
+
+        # Only keep the attributes needed in the final dataset
+        wanted_columns = [
+            "feature_id",
+            "geometry",
+            "name",
+            "name:en",
+            "iata",
+            "icao",
+        ]
+
+        # Add an empty column if a tag does not exist in this country
+        for column in wanted_columns:
+            if column not in gdf.columns:
+                gdf[column] = None
+
+        # Keep only the required columns
+        gdf = gdf[wanted_columns]
+
+        # Save over the original parquet
+        gdf.to_parquet(out_path, index=False)
 
     except Exception as e:
         print(f"Failed to process {country_name}: {e}")
@@ -137,7 +161,7 @@ def process_country_pbf(config, country_name, tags_filter, region):
     finally:
         os.chdir(old_cwd)
 
-    return out_path
+    return out_path  
 
 def write_tag_summary(processed_data_path, tag_labels):
     """Write the list of tag labels used in this run."""
@@ -199,14 +223,14 @@ def combine_country_parquets(config, tags_filter):
 def main(config):
     """Loop through a supplied country list, falling back to the workbook if needed."""
 
-    countries = None
+    countries = ["vietnam"]
 
     # ds list of OSM tag filters to extract (each tag is processed separately)
     tag_filters = [
         {"aeroway": ["aerodrome"]},
-        {"aeroway": ["terminal"]},
-        {"aeroway": ["runway"]},
-        {"aeroway": ["taxiway"]},
+        #{"aeroway": ["terminal"]},
+        #{"aeroway": ["runway"]},
+        #{"aeroway": ["taxiway"]},
         
     ]
 
@@ -263,22 +287,6 @@ def main(config):
         # ds combine all country parquet files for the current tag
         combine_country_parquets(config, tags_filter)
 
-
-## same function expect does not loop thorugh multiple countires 
-def main_single_file(config, osm_name, tags_filter, output_name):
-    """Keep the old single-file behaviour available for one-off manual runs."""
-    incoming_data_path = config['paths']['incoming_data']
-    processed_data_path = config["paths"]["processed_data"]
-    in_path = os.path.join(incoming_data_path, "osm", osm_name + ".osm.pbf")
-    out_path = os.path.join(processed_data_path, "infrastructure", output_name + ".parquet")
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
-    qo.convert_pbf_to_parquet(
-        pbf_path=in_path,
-        result_file_path=out_path,
-        tags_filter=tags_filter,
-        explode_tags=False,
-    )
  
 ''' list of tags to filter for  OSM data
                 #"aeroway": ["terminal"],
