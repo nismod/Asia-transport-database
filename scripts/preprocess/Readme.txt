@@ -1,45 +1,159 @@
 
-**Overview of all script**
+Overview of all script
+
+Note: a * infrount of a data set indicates it is the final output
 
 Airports.py:
-    -uses airport data from: incoming_data/infrastructure/Airport
-        -OurAirports, OurAirport_filtered_airports.gpkg
-        -World Bank, worldbank_filtered_airport_flows.gpkg worldbank_filtered_airport_volume.gpkg
-    -corrects the World Bank airport coordinates using the OurAirports coordinates where a matching IATA code is available
-    -keeps the original World Bank coordinates where an OurAirports match is not available
-    -corrects the origin and destination coordinates of World Bank flight connections (flows) using OurAirports
-    -file output names:
-        -corrected airport points, world_bank_airports_corrected.gpkg
-        -corrected airport flight connections, airport_flows_world_bank_corrected.gpkg
-        -Excel audit table showing matched and unmatched airports and the original and corrected coordinates, airport_coordinate_audit.xlsx
+    Incoming data:
+        -Directory: incoming_data/infrastructure/Airport/
+            -Ourairports.csv: OurAirports airport attributes and coordinates. 
+                Description: Export of all global data reported by OurAirports.
+                Reference: https://ourairports.com/data/
+            -worldbank_filtered_airport_volume.gpkg
+                Description: World bank airports, filterd to only include countires in the study area.
+                Reference: https://datacatalog.worldbank.org/search/dataset/0038117/global-airports
+            -worldbank_filtered_airport_flows.gpkg
+                Description: World bank flows (connections between airports), filterd to only include flows between airports in the study area.
+                Reference: https://datacatalog.worldbank.org/search/dataset/0038117/global-airports
+        -Directory: incoming_data/
+            -Countries_list.xlsx
+                Description: List of all countires in the study area
+                Reference: created by Darcey Sutcliffe
+    Outgoing data:
+        -Directory: processed_data/infrastructure/airport/
+            -filtered_Ourairports.csv 
+                Description: Filters small, medium and large airports from the Ourairports.cvs
+            -filtered_Ourairports.gpkg
+                Description: Filters small, medium and large airports from the Ourairports.cvs
+            -*world_bank_airports_corrected.gpkg
+                Description: World bank airports correct to the location of Ourairports (which has bettter spatial accuracy)
+            -*airport_flows_world_bank_corrected.gpkg
+                Description: Worldbank flows correct to connect between the correted airport coordinates
+            -airport_coordinate_audit.xlsx
+                Description: Spreadsheet that shows how many world bank airport data points were able to be matched and hence corrected against the Ourairport dataset (allows viewing of world bank points that were not corrected)
+    Analysis
+        -uses airport data from OurAirport.cvs, worldbank_filtered_airport_flows.gpkg worldbank_filtered_airport_volume.gpkg
+        -Filters Ourairport data to only include countires in the study area (Countries_list)
+        -corrects the World Bank airport coordinates using the OurAirports coordinates where a matching IATA code is available
+        -keeps the original World Bank coordinates where an OurAirports match is not available
+        -corrects the origin and destination coordinates of World Bank flight connections (flows) using OurAirports
+    
+airport_shapefile_nearest.py:
+    Incoming data:
+        -Directory: processed_data/infrastructure/airport/
+            -world_bank_airports_corrected.gpkg
+                Description: Corrected World Bank airport points used to match nearby OSM features using the airport IATA code.
+                Reference: Created in Aiports.py
+        -Directory: processed_data/infrastructure/osm_filter/
+            -[tag]/[country]_[tag].parquet
+                Description: OSM lines and polygons extracted for the study area.
+                Reference: https://download.geofabrik.de/index.html
+    Outgoing data:
+        -Directory: processed_data/infrastructure/airport/
+            -*airport_osm_features_within_2km.gpkg
+                Description: OSM lines and polygons matched to Corrected World Bank airport points within 2 km.
+            -airport_osm_features_within_2km.xlsx
+                Description: Audit workbook containing matched shapes, airport summaries and OSM tag summaries.
+    Analysis:
+        - reads corrected World Bank airport points and OSM GeoParquet files
+        - keeps OSM lines and polygons and excludes combined Asia-Pacific files
+        - matches OSM features within 2 km of each World Bank airport
+        - outputs the matched features and audit summaries for validation
 
-OSM_extract_country_loop.py:
-    - extracts an osm (or multiple) tags from a pbf files
-    - currently circles through all countires in asian pacific study area (list in country_list_osm, modified for the the osm extractoin name)
-    - outputs a parquet file for each country, and a combined asia-pacific file
-    -currently russia pbf file doesnt work
 
-port_shapefile_nearest:
-    - matches port_landuse.gpkg to the nearest node in global_maritime_network.gpkg, both from here https://data.mendeley.com/datasets/kdyt24tsh5/1 , Jasper Verschuur 
-      and attaches the port ID to the shapefile.
-    -file output names
-        port_landuse_nearest_port_id_lookup - excel spread sheet and gpkg
+OSM_extract_country_loop.py (Ran on ARC by Darcey Sutcliffe):
+    Incoming data:
+        -Directory: incoming_data/osm/
+            -[country/ region].osm.pbf
+                Description: OSM pbf  files
+                Reference: https://download.geofabrik.de/index.html
+        -Directory: incoming_data/
+            -Countries_list.xlsx
+                Description: List of all countires in the study area
+                Reference: created by Darcey Sutcliffe
+    Outgoing data:
+        -Directory: processed_data/infrastructure/osm_filter/
+            -[country/region]_[tag].parquet
+                Description: Extraction of a tag (or group of) from OSM, either for a defined set of countires or the study area as specified
+    Analysis:
+        - extracts an osm (or multiple) tags from a pbf files
+        - currently circles through all countires in asian pacific study area (list in country_list_osm, modified for the the osm extractoin name)
+        - outputs a parquet file for each country, and a combined asia-pacific file
+        - currently russia pbf file doesnt work
+
+port_shapefile_nearest.py:
+    Incoming data:
+        -Directory: incoming_data/infrastructure/port/
+            -port_landuse.gpkg
+                Description: Shapefiles of maritime ports
+                Reference: https://data.mendeley.com/datasets/kdyt24tsh5/1 (Jasper Verschuur)
+            -port_landuse_nearest_port_id_lookup_checked.xlsx
+                Description: Spreadsheet created manually, checking if the nearest port for a shapefile is the correct port, if not the correct port_id is labled 
+                Reference: Created by Darcey Sutcliffe
+            -asia_pacific_maritime_network_PROVA_NEW1.gpkg
+                Description: Maritime network 
+                Reference:  Created by port.py
+    Outgoing data:
+        -Directory: processed_data/infrastructure/port/
+            -*port_landuse_nearest_port_ids.gpkg
+                Description: Final gpkg file with correct port_id to shapefile relationship
+            -port_landuse_nearest_port_id_lookup_checked_result.xlsx
+                Description: Validation that the port id data was updated correctly
+            -port_landuse_nearest_port_id_lookup.xlsx
+                Decription: Outlines the closest port to each shapefile (BEFORE DATA IS MANULLY CORRECTED)
+    Analysis: 
+        - reads port land-use polygons from incoming_data/infrastructure/Port/port_landuse.gpkg
+        - reads port nodes from the processed Asia-Pacific maritime network
+        - filters port_landuse.gpkg to countries in the study-area country list
+        - matches every landuse polygon to its nearest port node
+        - reads manually checked corrections from incoming_data/infrastructure/port/port_landuse_nearest_port_id_lookup_checked.xlsx
+        - outputs corrected GeoPackage: processed_data/infrastructure/port/port_landuse_nearest_port_ids.gpkg
+        - outputs the original and final port_id for verification in: processed_data/infrastructure/port/port_landuse_nearest_port_id_lookup_checked_result.xlsx
+        - source network data: https://data.mendeley.com/datasets/kdyt24tsh5/1 (Jasper Verschuur)
 
 ports.py:
-    -Code initally copied from the African-transport-dataset/scripts/preprocess/ "ports_new_merge.py"
-    -produces network digrams for:
-        -the world
-        -asia and pacific (all countries in the study area are labled under this)
-        -3 clusters (northern russia, pacific region, larger cluster (the rest of the nodes, making up most of Asia)
-        -attributes from portwatch are also added to the nodes
-        -output is diveded into 2 nodes (ports and maritime (networking) nodes, and edges the connections between)
-        -file output names
-            global_maritime_network_PROVA_NEW1
-            asia & pacific_maritime_network_PROVA_NEW1
-            northern_russia_network_maritime_network
-            large_cluster_maritime_network
-            pacific_network_maritime_network
+    Incoming data:
+        -Directory: incoming_data/infrastructure/port/ and incoming_data/Global port supply-chains/
+            -Ports.csv: 
+                Description: Point locations of maritime ports
+                Reference: https://data.mendeley.com/datasets/kdyt24tsh5/1 (Jasper Verschuur)
+            -port_calls_average_2023-2025.csv:
+                Description: Port attribute data
+                Reference: Portwatch, provided by Jasper Verschuur https://portwatch.imf.org/
+            -port_capacity_called_average_2023-2025.csv: 
+                Description: Port attribute data
+                Reference: Portwatch, provided by Jasper Verschuur https://portwatch.imf.org/
+            -port_turn_around_time_average_2023-2025.csv: 
+                Description: Port attribute data
+                Reference: Portwatch, provided by Jasper Verschuur https://portwatch.imf.org/
+        -Directory: incoming_data/
+            -Countries_list.xlsx 
+                Description: List of all countires in the study area
+                Reference: Created by Darcey Sutcliffe
+    Outgoing data:
+        -Directory: processed_data/infrastructure/port/
+            -global_maritime_network_PROVA_NEW1.gpkg 
+                Description: global maritime network
+            -asia_pacific_maritime_network_PROVA_NEW1.gpkg 
+                Description: Asia-Pacific maritime network (includes connetions between clusters)
+            -northern_russia_network_maritime_network.gpkg
+                Description: northern Russia network
+            -large_cluster_maritime_network.gpkg 
+                Description: large cluster network
+            -pacific_network_maritime_network.gpkg
+                Description: Pacific network
+            -*cleaned_asia_pacific_maritime_network_PROVA_NEW1.gpkg
+                Description: Asia-Pacific maritime network (made by combing the three seperate network clusters)
+    Analysis:
+        -Code initally copied from the African-transport-dataset/scripts/preprocess/ "ports_new_merge.py"
+        -produces network digrams for:
+            -the world
+            -asia and pacific (all countries in the study area are labled under this)
+            -3 clusters (northern russia, pacific region, larger cluster (the rest of the nodes, making up most of Asia)
+            -attributes from portwatch are also added to the nodes
+            -output is diveded into 2 nodes (ports and maritime (networking) nodes, and edges the connections between)
 
 untils_new.py:
     untils_new.py copied from the African-transport-dataset/scripts/preprocess/
-    includes relevant functions
+    includes relevant functions.
+
