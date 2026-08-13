@@ -17,16 +17,6 @@ def load_config():
     return config
 
 
-def find_column(columns, candidates):
-    """
-    Return the first column name from `candidates` that exists in `columns`.
-    """
-    for c in candidates:
-        if c in columns:
-            return c
-    raise KeyError(f"Could not find any of these columns: {candidates}")
-
-
 def filter_and_convert_airports(
     incoming_airport_path, incoming_data_path, output_path, airport_types
 ):
