@@ -143,6 +143,17 @@ def write_checked_id_audit(original, corrected, node_polygon_audit, output_xlsx)
         audit["original_nearest_port_id"].map(_normalise_checked_value)
         != audit["checked_nearest_port_id"].map(_normalise_checked_value)
     )
+    audit = audit.rename(columns={
+        column: f"LandUse_{column}" for column in audit_columns
+    } | {
+        "original_nearest_port_id": "Network_original_nearest_port_id",
+        "checked_nearest_port_id": "CheckedWorkbook_nearest_port_id",
+        "changed": "Calculated_changed",
+    })
+    node_polygon_audit = node_polygon_audit.rename(columns={
+        column: f"Network_{column}" for column in node_polygon_audit.columns
+        if column not in {"polygon_count", "missing_polygon_data"}
+    })
     with pd.ExcelWriter(output_xlsx, engine="openpyxl") as writer:
         audit.to_excel(writer, sheet_name="checked_id_audit", index=False)
         node_polygon_audit.to_excel(writer, sheet_name="node_polygon_audit", index=False)
@@ -324,6 +335,20 @@ def main(config):
             "distance_m", # calculated, distance between port and node
         ]
     ].copy()
+    lookup_export = lookup_export.rename(columns={
+        "port_name": "LandUse_port_name",
+        "country": "LandUse_country",
+        "continent": "LandUse_continent",
+        "area": "LandUse_area",
+        "type": "LandUse_type",
+        "sector": "LandUse_sector",
+        "land_use": "LandUse_land_use",
+        "nearest_port_id": "Network_nearest_port_id",
+        "nearest_port_name": "Network_nearest_port_name",
+        "nearest_port_country": "Network_nearest_port_country",
+        "nearest_port_iso3": "Network_nearest_port_iso3",
+        "distance_m": "Calculated_distance_m",
+    })
 
     output_landuse = os.path.join(output_dir, "port_landuse_nearest_port_ids.gpkg")
     original_nearest = nearest.copy()
@@ -368,6 +393,11 @@ def main(config):
         os.path.join(output_dir, "port_landuse_nearest_port_id_lookup_checked_result.xlsx"),
     )
 
+    node_polygon_audit = node_polygon_audit.rename(columns={
+        column: f"Network_{column}" for column in
+        ["id", "name", "infra", "country", "iso3"]
+    })
+
     # Save everything into one Excel workbook with separate sheets.
     lookup_xlsx = os.path.join(output_dir, "port_landuse_nearest_port_id_lookup.xlsx")
 
@@ -382,8 +412,8 @@ def main(config):
         ],
         "value": [
             len(lookup_export),
-            int(lookup_export["nearest_port_id"].notna().sum()),
-            int(lookup_export["nearest_port_id"].isna().sum()),
+            int(lookup_export["Network_nearest_port_id"].notna().sum()),
+            int(lookup_export["Network_nearest_port_id"].isna().sum()),
             len(node_polygon_audit),
             int(node_polygon_audit["missing_polygon_data"].sum()),
             int((node_polygon_audit["polygon_count"] > 0).sum()),
@@ -403,8 +433,8 @@ def main(config):
         red_fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
 
         header_map = {cell.value: cell.column for cell in ws[1]}
-        port_col = header_map["port_name"]
-        nearest_col = header_map["nearest_port_name"]
+        port_col = header_map["LandUse_port_name"]
+        nearest_col = header_map["Network_nearest_port_name"]
 
         for row in range(2, ws.max_row + 1):
             port_value = ws.cell(row=row, column=port_col).value
@@ -457,8 +487,8 @@ def main(config):
 
         # Get header positions
         headers = {ws.cell(row=1, column=c).value: c for c in range(1, ws.max_column + 1)}
-        country_col = headers["country"]
-        nearest_country_col = headers["nearest_port_country"]
+        country_col = headers["LandUse_country"]
+        nearest_country_col = headers["Network_nearest_port_country"]
 
         # Color the whole row based on whether country matches nearest_port_country
         for row in range(2, ws.max_row + 1):
@@ -477,7 +507,7 @@ def main(config):
 
 
 
-    unmatched_count = lookup_export["nearest_port_id"].isna().sum()
+    unmatched_count = lookup_export["Network_nearest_port_id"].isna().sum()
     matched_count = len(lookup_export) - unmatched_count
 
     print(f"Allowed ISO3 countries in workbook: {len(country_ref)}")
