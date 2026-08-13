@@ -219,6 +219,47 @@ def create_network_for_port_ids(all_port_nodes, all_port_edges, port_id_list, ou
 
     print(f"Saved subnetwork: {out_file}")
 
+
+def combine_asia_pacific_clusters(processed_data_path):
+    """Combine the three generated Asia-Pacific cluster files into one GeoPackage."""
+    port_output_dir = os.path.join(processed_data_path, "infrastructure", "port")
+    cluster_files = [
+        "large_cluster_maritime_network.gpkg",
+        "northern_russia_network_maritime_network.gpkg",
+        "pacific_network_maritime_network.gpkg",
+    ]
+    output_file = os.path.join(
+        port_output_dir, "cleaned_asia_pacific_maritime_network_PROVA_NEW1.gpkg"
+    )
+
+    # Cluster edge IDs can originate from separate subnetworks, so retain every
+    # edge and only de-duplicate node IDs.
+    layers = {"port_nodes": "id", "maritime_nodes": "id", "edges": None}
+    combined = {}
+    for layer, key in layers.items():
+        parts = []
+        for filename in cluster_files:
+            path = os.path.join(port_output_dir, filename)
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Cluster file not found: {path}")
+            parts.append(gpd.read_file(path, layer=layer))
+
+        target_crs = parts[0].crs
+        parts = [part.to_crs(target_crs) if part.crs != target_crs else part for part in parts]
+        result = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), geometry="geometry", crs=target_crs)
+        if key is not None and key in result.columns:
+            result = result.drop_duplicates(subset=[key], keep="first")
+        combined[layer] = result
+
+    # Start a fresh GeoPackage so rerunning the preprocessing does not retain stale layers.
+    if os.path.exists(output_file):
+        os.remove(output_file)
+    for index, (layer, result) in enumerate(combined.items()):
+        result.to_file(output_file, layer=layer, driver="GPKG", mode="w" if index == 0 else "a")
+
+    print(f"Saved combined Asia-Pacific network: {output_file}")
+    return output_file
+
 def main(config):
 
     continent = "Asia & Pacific" #Asia & Pacific, Africa 
@@ -464,6 +505,7 @@ def main(config):
     asia_port_nodes = port_nodes[(port_nodes['continent'] == 'Asia & Pacific')]
     remainder_port_ids = asia_port_nodes[~asia_port_nodes['id'].isin(selected_ids)]['id'].tolist()
     create_network_for_port_ids(port_nodes, port_edges, remainder_port_ids, 'large_cluster', processed_data_path)
+    combine_asia_pacific_clusters(processed_data_path)
     # global_edges = port_edges[["from_id","to_id","id","from_infra","to_infra","geometry"]].to_crs(epsg_meters)
     # global_edges["distance"] = global_edges.geometry.length
 
