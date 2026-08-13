@@ -13,7 +13,6 @@ from tqdm import tqdm
 tqdm.pandas()
 #from pyrosm import OSM # ds package wasnt working locally for me, so commented out temparorarily
 import quackosm as qo
-import shutil
 
 def load_config():
     script_dir = os.path.dirname(os.path.abspath(__file__)) # ds extract the directory of the current script (removing the filename)
@@ -180,7 +179,7 @@ def write_tag_summary(processed_data_path, tag_labels):
     print(f"Saved tag summary to {summary_path}")
 
 
-def combine_country_parquets(config, tags_filter):
+def combine_country_parquets(config, tags_filter, append_existing=False, new_files=None):
     """Combine all country parquet files for one tag into a single continent-wide file."""
     processed_data_path = config["paths"]["processed_data"]
     tag_label = build_tag_label(tags_filter)
@@ -197,11 +196,23 @@ def combine_country_parquets(config, tags_filter):
 
     combined_name = f"{tag_label}_asia_pacific.parquet"
 
-    parquet_files = sorted(
-        os.path.join(input_dir, f)
-        for f in os.listdir(input_dir)
-        if f.endswith(".parquet") and f != combined_name
-    )
+    if append_existing:
+        # When processing a manually supplied country list, retain the existing
+        # Asia-Pacific file and append only the files produced in this run.
+        parquet_files = [
+            path for path in (new_files or [])
+            if os.path.isfile(path) and os.path.basename(path) != combined_name
+        ]
+    else:
+        parquet_files = sorted(
+            os.path.join(input_dir, f)
+            for f in os.listdir(input_dir)
+            if f.endswith(".parquet") and f != combined_name
+        )
+
+    existing_path = os.path.join(input_dir, combined_name)
+    if append_existing and os.path.exists(existing_path):
+        parquet_files.insert(0, existing_path)
 
     if not parquet_files:
         print(f"No parquet files found in {input_dir}")
@@ -215,6 +226,9 @@ def combine_country_parquets(config, tags_filter):
         crs=gdfs[0].crs,
     )
 
+    if append_existing and "feature_id" in combined.columns:
+        combined = combined.drop_duplicates(subset="feature_id", keep="last")
+
     output_path = os.path.join(input_dir, combined_name)
     combined.to_parquet(output_path)
 
@@ -223,10 +237,10 @@ def combine_country_parquets(config, tags_filter):
 def main(config):
     """Loop through a supplied country list, falling back to the workbook if needed."""
 
-    countries = None # if none use spreadsheet, otherwise ["vietnam"]
+    countries = ["russia"] # if none use spreadsheet, otherwise ["vietnam"]
     # ds list of OSM tag filters to extract (each tag is processed separately)
     tag_filters = [
-        {"aeroway": ["aerodrome"]},
+        #{"aeroway": ["aerodrome"]},
         {"aeroway": ["terminal"]},
         {"aeroway": ["runway"]},
         {"aeroway": ["taxiway"]},
@@ -248,12 +262,10 @@ def main(config):
             tag_label,
         )
 
-        # ds delete the old output folder for this tag if it already exists
-        if os.path.exists(tag_output_dir):
-            shutil.rmtree(tag_output_dir)
-
-        # ds create a new empty output folder for this tag
+        # Preserve existing outputs and add/update files in the tag folder.
         os.makedirs(tag_output_dir, exist_ok=True)
+
+        processed_files = []
 
         # ds loop through all countries for the current tag
         for country_record in tqdm(
@@ -276,15 +288,22 @@ def main(config):
             if not country_name:
                 continue
 
-            process_country_pbf(
+            output_path = process_country_pbf(
                 config=config,
                 country_name=country_name,
                 tags_filter=tags_filter,
                 region=region,
             )
+            if output_path is not None:
+                processed_files.append(output_path)
 
         # ds combine all country parquet files for the current tag
-        combine_country_parquets(config, tags_filter)
+        combine_country_parquets(
+            config,
+            tags_filter,
+            append_existing=countries is not None,
+            new_files=processed_files,
+        )
 
  
 ''' list of tags to filter for  OSM data
