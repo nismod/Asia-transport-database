@@ -7,7 +7,6 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import LineString
 
-
 def load_config():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, "..", "..", "config.json")
@@ -28,9 +27,54 @@ def find_column(columns, candidates):
     raise KeyError(f"Could not find any of these columns: {candidates}")
 
 
+def filter_and_convert_airports(
+    incoming_airport_path, incoming_data_path, output_path, airport_types
+):
+    """Filter OurAirports data and write both CSV and GeoPackage outputs."""
+    airports_file = os.path.join(incoming_airport_path, "Ourairports.csv")
+    countries_file = os.path.join(incoming_data_path, "Countries_list.xlsx")
+    filtered_csv = os.path.join(output_path, "filtered_Ourairports.csv")
+    filtered_gpkg = os.path.join(output_path, "filtered_Ourairports.gpkg")
+
+    countries = pd.read_excel(countries_file, usecols="B", engine="openpyxl")
+    study_country_codes = {
+        code
+        for code in countries.iloc[:, 0].dropna().astype(str).str.strip().str.upper()
+        if len(code) == 2 and code.isalpha()
+    }
+
+    airports = pd.read_csv(airports_file)
+    required = {"type", "iso_country", "latitude_deg", "longitude_deg"}
+    missing = required - set(airports.columns)
+    if missing:
+        raise ValueError(f"airports.csv is missing required columns: {sorted(missing)}")
+
+    filtered = airports[
+        airports["iso_country"].astype(str).str.strip().str.upper().isin(study_country_codes)
+        & airports["type"].isin(airport_types)
+    ].copy()
+    filtered.to_csv(filtered_csv, index=False)
+
+    points = filtered.dropna(subset=["latitude_deg", "longitude_deg"]).copy()
+    gdf = gpd.GeoDataFrame(
+        points,
+        geometry=gpd.points_from_xy(points["longitude_deg"], points["latitude_deg"]),
+        crs="EPSG:4326",
+    )
+    if os.path.exists(filtered_gpkg):
+        os.remove(filtered_gpkg)
+    gdf.to_file(filtered_gpkg, layer="airports", driver="GPKG", index=False)
+
+    print(f"Read {len(airports):,} airport rows")
+    print(f"Wrote {len(filtered):,} filtered rows to: {filtered_csv}")
+    print(f"Wrote {len(gdf):,} airport points to: {filtered_gpkg}")
+
+
 def main(config):
 
     crs="EPSG:4326"
+
+    
 
     incoming_data_path = config["paths"]["incoming_data"]
     processed_data_path = config["paths"]["processed_data"]
@@ -39,11 +83,14 @@ def main(config):
     output_path = os.path.join(processed_data_path, "infrastructure", "airport")
     os.makedirs(output_path, exist_ok=True)
 
+    AIRPORT_TYPES = {"medium_airport", "large_airport", "small_airport"}
+    filter_and_convert_airports(airport_path, incoming_data_path, output_path, AIRPORT_TYPES)
+
     # ------------------------------------------------------------------
     # Update these filenames if yours are different
     # ------------------------------------------------------------------
     world_bank_file = os.path.join(airport_path, "worldbank_filtered_airport_volume.gpkg")
-    ourairports_file = os.path.join(airport_path, "OurAirport_filtered_airports.gpkg")
+    ourairports_file = os.path.join(output_path, "filtered_Ourairports.gpkg")
 
     # Read the layers/files
     world_bank = gpd.read_file(world_bank_file)
@@ -166,15 +213,9 @@ def main(config):
 
     print(f"Saved corrected airports file to: {out_file}")
 
-    airport_path = os.path.join(incoming_data_path, "infrastructure", "airport")
-    output_path = os.path.join(processed_data_path, "infrastructure", "airport")
-    os.makedirs(output_path, exist_ok=True)
-
     world_bank_file = os.path.join(airport_path, "worldbank_filtered_airport_flows.gpkg")
-    ourairports_file = os.path.join(airport_path, "OurAirport_filtered_airports.gpkg")
 
     flows = gpd.read_file(world_bank_file)
-    ourairports = gpd.read_file(ourairports_file)
 
     def pick_col(columns, candidates):
         for c in candidates:
@@ -238,10 +279,46 @@ def main(config):
 
     #excel file with oa, wb oringal data and the merged point cooridantes and outlines any points that did not match up from both datasets
     excel_file = os.path.join(output_path, "airport_coordinate_audit.xlsx")
+    match_summary = (
+        audit["match_status"]
+        .value_counts()
+        .reindex(["matched", "ourairports_only", "world_bank_only"], fill_value=0)
+        .rename_axis("match_status")
+        .reset_index(name="count")
+    )
+
+    def label_audit_columns(frame):
+        """Make the source of exported audit columns explicit."""
+        world_bank_columns = set(world_bank.columns)
+        ourairports_columns = set(ourairports.columns)
+        renamed = {}
+        for column in frame.columns:
+            if column in {"match_status", "_merge", "merged_lon", "merged_lat"}:
+                renamed[column] = {
+                    "_merge": "join_result",
+                    "match_status": "match_status",
+                    "merged_lon": "merged_longitude",
+                    "merged_lat": "merged_latitude",
+                }[column]
+            elif column.endswith("_wb"):
+                renamed[column] = f"WorldBank_{column[:-3]}"
+            elif column.endswith("_oa"):
+                renamed[column] = f"OurAirports_{column[:-3]}"
+            elif column in world_bank_columns and column not in ourairports_columns:
+                renamed[column] = f"WorldBank_{column}"
+            elif column in ourairports_columns and column not in world_bank_columns:
+                renamed[column] = f"OurAirports_{column}"
+        return frame.rename(columns=renamed)
+
+    audit_export = label_audit_columns(audit)
+    merged_export = merged.rename(
+        columns={column: f"WorldBank_{column}" for column in merged.columns}
+    )
 
     with pd.ExcelWriter(excel_file, engine="openpyxl") as writer:
-        audit.to_excel(writer, sheet_name="all_airports_audit", index=False)
-        merged.to_excel(writer, sheet_name="world_bank_corrected", index=False)
+        audit_export.to_excel(writer, sheet_name="all_airports_audit", index=False)
+        merged_export.to_excel(writer, sheet_name="world_bank_corrected", index=False)
+        match_summary.to_excel(writer, sheet_name="match_summary", index=False)
 
     print(f"Saved audit Excel file to: {excel_file}")
 
