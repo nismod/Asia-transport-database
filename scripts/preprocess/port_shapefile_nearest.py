@@ -67,6 +67,87 @@ COUNTRY_ALIASES = { # alternative names for countries, abd there iso standard na
     "northern ireland": "United Kingdom",
 }
 
+CHECKED_KEY_COLUMNS = ["port_name", "country", "continent", "area", "type", "sector", "land_use"]
+CHECKED_ID_COLUMN = "correct port ID"
+
+
+def _normalise_checked_value(value): # ds normalise the values removes spaces and converts to string
+    if pd.isna(value):
+        return ""
+    if isinstance(value, float):
+        return format(value, ".15g")
+    return str(value).strip()
+
+
+def apply_checked_nearest_port_ids(nearest, checked_xlsx, output_path):
+    """Apply manually checked IDs and save a corrected copy of the layer."""
+    if not os.path.exists(checked_xlsx):
+        print(f"Checked workbook not found; skipping corrections: {checked_xlsx}")
+        nearest.to_file(output_path, layer="port_landuse", driver="GPKG")
+        return nearest
+
+    checked = pd.read_excel(checked_xlsx, sheet_name="lookup")
+    required = set(CHECKED_KEY_COLUMNS + [CHECKED_ID_COLUMN])
+    missing = sorted(required - set(checked.columns))
+    if missing:
+        raise ValueError(f"Checked workbook is missing columns: {', '.join(missing)}")
+
+    source = nearest.copy()
+    for frame in (source, checked):
+        for column in CHECKED_KEY_COLUMNS:
+            frame[column] = frame[column].map(_normalise_checked_value)
+        frame["_occurrence"] = frame.groupby(CHECKED_KEY_COLUMNS, dropna=False).cumcount()
+
+    corrections = checked[CHECKED_KEY_COLUMNS + ["_occurrence", CHECKED_ID_COLUMN]].rename(
+        columns={CHECKED_ID_COLUMN: "checked_nearest_port_id"}
+    )
+    merged = source.merge(
+        corrections,
+        on=CHECKED_KEY_COLUMNS + ["_occurrence"],
+        how="left",
+        validate="one_to_one",
+    )
+    # Blank IDs mean the row was not corrected; preserve the generated ID.
+    has_checked_id = merged["checked_nearest_port_id"].map(_normalise_checked_value) != ""
+    matched = has_checked_id
+    unmatched_count = int((~matched).sum())
+    if unmatched_count:
+        print(f"Leaving {unmatched_count} rows unchanged because they are not in the checked workbook")
+
+    changed = matched & (
+        merged["nearest_port_id"].map(_normalise_checked_value)
+        != merged["checked_nearest_port_id"].map(_normalise_checked_value)
+    )
+    # Use positional assignment: the merge creates a fresh index, which may
+    # not match the original GeoDataFrame index used by ``loc``.
+    changed_positions = changed.to_numpy()
+    nearest.iloc[changed_positions, nearest.columns.get_loc("nearest_port_id")] = (
+        merged.loc[changed, "checked_nearest_port_id"].to_numpy()
+    )
+    nearest.to_file(output_path, layer="port_landuse", driver="GPKG")
+    print(f"Applied {int(changed.sum())} checked nearest-port ID corrections")
+    print(f"Saved corrected layer to: {output_path}")
+    return nearest
+
+
+def write_checked_id_audit(original, corrected, node_polygon_audit, output_xlsx):
+    """Write a workbook showing the generated and final nearest-port IDs."""
+    audit_columns = [
+        column for column in CHECKED_KEY_COLUMNS
+        if column in original.columns
+    ]
+    audit = original[audit_columns].copy()
+    audit["original_nearest_port_id"] = original["nearest_port_id"].to_numpy()
+    audit["checked_nearest_port_id"] = corrected["nearest_port_id"].to_numpy()
+    audit["changed"] = (
+        audit["original_nearest_port_id"].map(_normalise_checked_value)
+        != audit["checked_nearest_port_id"].map(_normalise_checked_value)
+    )
+    with pd.ExcelWriter(output_xlsx, engine="openpyxl") as writer:
+        audit.to_excel(writer, sheet_name="checked_id_audit", index=False)
+        node_polygon_audit.to_excel(writer, sheet_name="node_polygon_audit", index=False)
+    print(f"Saved checked ID audit workbook to: {output_xlsx}")
+
 
 def normalize_country(value):
     """Normalize a country name or ISO token for robust matching."""
@@ -245,7 +326,17 @@ def main(config):
     ].copy()
 
     output_landuse = os.path.join(output_dir, "port_landuse_nearest_port_ids.gpkg")
-    nearest.to_file(output_landuse, layer="port_landuse", driver="GPKG")
+    original_nearest = nearest.copy()
+
+    checked_xlsx = os.path.join(
+        incoming_data_path,
+        "infrastructure",
+        "port",
+        "port_landuse_nearest_port_id_lookup_checked.xlsx",
+    )
+    # Overwrite the generated layer with the checked result so only one
+    # GeoPackage is produced.
+    nearest = apply_checked_nearest_port_ids(nearest, checked_xlsx, output_landuse)
 
     # Build a node polygon audit sheet.
     # If your polygon layer uses a different linking field, change polygon_node_id_col above.
@@ -269,6 +360,13 @@ def main(config):
     node_polygon_audit["polygon_count"] = node_polygon_audit["polygon_count"].fillna(0).astype(int)
     node_polygon_audit["missing_polygon_data"] = node_polygon_audit["polygon_count"] == 0
     node_polygon_audit.drop(columns=["nearest_port_id"], inplace=True, errors="ignore")
+
+    write_checked_id_audit(
+        original_nearest,
+        nearest,
+        node_polygon_audit,
+        os.path.join(output_dir, "port_landuse_nearest_port_id_lookup_checked_result.xlsx"),
+    )
 
     # Save everything into one Excel workbook with separate sheets.
     lookup_xlsx = os.path.join(output_dir, "port_landuse_nearest_port_id_lookup.xlsx")
