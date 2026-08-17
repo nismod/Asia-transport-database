@@ -1,0 +1,694 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{xurl}
+\usepackage[hidelinks]{hyperref}
+\usepackage{parskip}
+\usepackage{xcolor}
+\usepackage{titlesec}
+
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{3}
+\setlist[itemize]{leftmargin=2em}
+
+% Consistent visual styling for the document and the file catalogue.
+\definecolor{brandblue}{HTML}{145A86}
+\definecolor{lightblue}{HTML}{EAF3F8}
+\definecolor{ruleblue}{HTML}{A9C9DA}
+\definecolor{mutedtext}{HTML}{4F6470}
+\titleformat{\section}
+  {\Large\bfseries\color{brandblue}}
+  {\thesection}{0.7em}{}
+\titlespacing*{\section}{0pt}{2.2em}{0.8em}
+\newcommand{\filelabel}[1]{\textbf{\color{brandblue}#1}}
+
+\title{Asian Transport Database Overview}
+\author{Summer 2026 Internship -- Darcey Sutcliffe}
+\date{}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+
+\section{Literature review}
+
+Completed a literature review to understand datasets/ complete work already published and open source.\par
+
+Outputs:\par
+
+Asia Transport Literature Tracker.xlsx\par
+
+\begin{itemize}
+\item Includes relevant publications, reports, datasets, organisations, list of countries in study area and modes relevant to each country.
+\end{itemize}
+
+Asia Transport Literature Tracker.pdf\par
+
+\begin{itemize}
+\item Summary of spreadsheet
+\end{itemize}
+
+
+
+\section{Airports}
+
+\subsection{Data sources used}
+
+\subsection{Analysis done}
+
+Airport node spatial data correction (completed in Airport.py)\par
+
+The World Bank airport dataset provided the only identified open source data containing flight connection paths between airports. Therefore, the World Bank airport points were used as the basis for the airport nodes used for the flight network.\par
+
+However, the World Bank airport coordinates were found to have poor spatial accuracy. The airport locations were therefore checked and corrected using the OurAirports dataset, which appeared to provide better spatial accuracy.\par
+
+The analysis used airport data from Ourairports.csv, worldbank\_filtered\_airport\_flows.gpkg and worldbank\_filtered\_airport\_volume.gpkg.\par
+
+OurAirports data was first filtered to include only countries within the study area using Countries\_list.xlsx. The World Bank airport coordinates were then corrected using the OurAirports coordinates where a matching IATA code was available. Where no matching OurAirports record was available, the original World Bank coordinates were retained.\par
+
+The origin and destination coordinates of the World Bank flight connections were then corrected using the corrected airport coordinates.\par
+
+airport\_coordinate\_audit.xlsx contains the audit of this matching process. The match\_summary sheet provides a summary of the number of airport locations that were common between the two datasets. 14 airports in the World Bank dataset could not be matched and therefore could not be spatially corrected using OurAirports.\par
+
+\subsubsection{Shapefile matching (OSM\_extract\_country\_loop and airport\_shapefile\_nearest.py):}
+
+Relevant tags were extracted from OSM.\par
+
+For Aiports these were:\par
+
+\{"aeroway": ["aerodrome"]\},\par
+
+\{"aeroway": ["terminal"]\},\par
+
+\{"aeroway": ["runway"]\},\par
+
+\{"aeroway": ["taxiway"]\},\par
+
+From here, any extracted OSM features located within 2 km of an airport node in worldbank\_filtered\_airport\_volume.gpkg were assigned to that airport. The airport’s IATA code was then added to the feature’s attributes. The final output combines all extracted OSM airport features into a single layer, with attributes identifying the feature’s original OSM tag (e.g. aerodrome, terminal, runway or taxiway) and the airport it was assigned to.\par
+
+
+
+\subsubsection{Still to do:}
+
+\begin{itemize}
+\item Check the spatial location of the 14 airport nodes in airport\_flows\_world\_bank\_corrected.gpkg, which did not have a match to the OurAirports database. (Validating that the flows also update if any airports get updated)
+\end{itemize}
+
+\begin{itemize}
+\item Add missing polygon data to the XX airports
+\end{itemize}
+
+\section{Maritime}
+
+\subsection{Data sources used/outputted}
+
+\begin{itemize}
+\item Port watch
+\end{itemize}
+
+\begin{itemize}
+\item Multi-hazard risk to global port infrastructure and resulting trade and logistics losses, [Jasper Verschuur](\url{https://www-nature-com.ezproxy-prd.bodleian.ox.ac.uk/articles/s43247-022-00656-7\#auth-Jasper-Verschuur-Aff1})
+\end{itemize}
+
+\begin{itemize}
+\item Port \_landuse.gpkg ( shapefiles for ports)
+\end{itemize}
+
+\begin{itemize}
+\item Global\_maritime\_network.gpkg (each node is at the centre of the port\_landuse shapefiles that it is relevant to)
+\end{itemize}
+
+\begin{itemize}
+\item Ports.shp
+\end{itemize}
+
+\subsection{Analysis done}
+
+\subsubsection{Maritime network (completed in ports.py):}
+
+Code initally copied from the African-transport-dataset/scripts/preprocess/ "ports\_new\_merge.py". Using the Ports.shp and updated 2023-2025 attribute data provided by Jasper Verschuur (port\_calls\_average\_2023-2025.csv, port\_calls\_average\_2023-2025.csv, port\_calls\_average\_2023-2025.csv). A nodel and edge network was created, with the attributes. The network was broken up into 3 clusters, to aid visuals (northern\_russia, pacific\_network and large\_cluster). The output contains two node types, ports (land) and maritime (networking), alongside the edge connections between.\par
+
+-file output names\par
+
+global\_maritime\_network\_PROVA\_NEW1\par
+
+asia \& pacific\_maritime\_network\_PROVA\_NEW1\par
+
+northern\_russia\_network\_maritime\_network\par
+
+large\_cluster\_maritime\_network\par
+
+pacific\_network\_maritime\_network\par
+
+
+
+\subsubsection{Shapefile correction (all done using port\_shapefile\_nearest.py and manually):}
+
+port\_landuse.gpkg shapefiles were matched to their corresponding ports by assigning the nearest port node to each polygon (nodes stored in asia\_pacific\_maritime\_network\_PROVA\_NEW1.gpkg) . The results of this automated matching are stored in port\_landuse\_nearest\_port\_id\_lookup.xlsx.\par
+
+
+
+The accuracy of these matches was then manually checked and recorded in port\_landuse\_nearest\_port\_id\_lookup\_checked.xlsx. Each match was assessed using the distance between the port node and the land-use polygon, the names associated with both datasets, and the port's location on Google Maps. In the checked file, the checked column indicates whether the port land-use shapefile (Column A) has been matched to the correct port node (Column H). Where checked indicates that the match is incorrect, the correct port id column records the correct port ID, identified manually.\par
+
+
+
+The corrections were then applied, and the port\_landuse\_nearest\_port\_ids.gpkg and port\_landuse\_nearest\_port\_id\_lookup\_checked\_result.xlsx contain the correct results.\par
+
+
+
+14 ports from the asia\_pacific\_maritime\_network\_PROVA\_NEW1.gpkg file did not have any polygon data (from port\_landuse.gpkg) matched to it. Seen in port\_landuse\_nearest\_port\_id\_lookup\_checked\_result.xlsx, sheet-node\_polygon\_audit, column missing\_polygon\_data = TRUE.\par
+
+
+
+\subsubsection{Still to do:}
+
+\begin{itemize}
+\item Add missing polygon data to the 14 ports.
+\end{itemize}
+
+
+
+\section{Road}
+
+\section{Rail}
+
+\section{Inland waterways}
+
+Investigated OSM tags, best appeared to be:\par
+
+Tag = boat:yes\par
+
+Tag = ferry : terminal\par
+
+
+
+\section{Multimodal}
+
+
+
+\section{ARC}
+
+ARC is separated into two file directories:\par
+
+\begin{quote}\ttfamily cd /data/cenv-opsis-astdb/\textbackslash\{\}<USERNAME>/asia-transport-database\end{quote}
+
+\begin{quote}\ttfamily cd /data/cenv-opsis-astdb/\textbackslash\{\}<USERNAME>/open-gira\end{quote}
+
+
+
+\section{Using open-gira on ARC}
+
+Purpose: Used to create the road and rail networks using OpenGIRA.\par
+
+\medskip
+1. Go to the OpenGIRA directory:
+
+\begin{quote}\ttfamily cd /data/cenv-opsis-astdb/\textbackslash\{\}<USERNAME>/open-gira\end{quote}
+
+\medskip
+2. Activate the OpenGIRA environment:
+
+\begin{quote}\ttfamily module load Mamba/23.11.0-0\end{quote}
+
+\begin{quote}\ttfamily export CONDA\_ENVS\_PATH=/home/mans4968/.mamba/envs\end{quote}
+
+\begin{quote}\ttfamily export MAMBA\_ROOT\_PREFIX=/home/mans4968/.mamba\end{quote}
+
+\begin{quote}\ttfamily eval "\$(conda shell.bash hook)"\end{quote}
+
+\begin{quote}\ttfamily conda activate /home/mans4968/.mamba/envs/open-gira\end{quote}
+
+\medskip
+3. Run OpenGIRA using Snakemake and the ARC profile (not run on a .sh file):
+
+\begin{quote}\ttfamily snakemake --profile config/ARC --cores 1\end{quote}
+
+A specific output can also be requested, for example:\par
+
+\begin{quote}\ttfamily snakemake --profile config/ARC --cores 1 results/russia-latest\_filter-road-primary/edges.gpq\end{quote}
+
+\medskip
+4. Check jobs currently running:
+
+\begin{quote}\ttfamily squeue -u \$USER\end{quote}
+
+\medskip
+5. Check completed/failed jobs:
+
+\begin{quote}\ttfamily sacct -u \$USER --format=JobID,JobName,State,Elapsed,ExitCode\end{quote}
+
+\medskip
+6. Outputs are stored in:
+
+\begin{quote}\ttfamily /data/cenv-opsis-astdb/\textbackslash\{\}<USERNAME>/open-gira/results/\end{quote}
+
+Completed final networks are organised into:\par
+
+\begin{quote}\ttfamily results/road/\end{quote}
+
+\begin{quote}\ttfamily results/rail/\end{quote}
+
+Other folders such as geoparquet/, slices/, json/ and input/\par
+
+contain input or intermediate OpenGIRA data.\par
+
+ \par
+
+\section{Asia-transport-database on ARC}
+
+Purpose: Used to run the Asia transport database processing, including the\par
+
+country-by-country OSM infrastructure extraction.\par
+
+1. Go to the Asia database:\par
+
+\begin{quote}\ttfamily cd /data/cenv-opsis-astdb/\textbackslash\{\}<USERNAME>/asia-transport-database\end{quote}
+
+2. Input OSM data are stored in:\par
+
+   incoming\_data/osm/\par
+
+3. Run the required Asia transport database script/job on ARC.\par
+
+See various .sh files\par
+
+4. Processed outputs are stored in:\par
+
+   processed\_data/infrastructure/\par
+
+
+
+\section{Already existing country multimodal transport packages}
+
+Multimodal transport data packages have already been extracted for China, Singapore, New Zealand, and Australia. These datasets can be used later for comparison and validation against the wider transport database. The packages are stored under:\par
+
+incoming\_data/infrastructure/[folder name]\par
+
+The content of each country package varies, and not all packages contain data for every transport mode.\par
+
+
+
+\section{Files Overview}
+
+\begin{center}
+\colorbox{lightblue}{\parbox{0.93\textwidth}{
+\centering
+{\Large\bfseries\color{brandblue} Asia-transport-database repository}\\[0.35em]
+{\small\color{mutedtext} A catalogue of inputs, intermediate files, final outputs and processing scripts}
+}}
+\end{center}
+
+\vspace{0.4em}
+\noindent\textit{Legend:} entries marked with a blue star (\textcolor{brandblue}{\textbf{★}}) are final outputs.\\[-0.2em]
+\noindent\textcolor{mutedtext}{Files are grouped by their repository location; the descriptions below record their purpose, provenance and producing script.}
+
+% Turn the existing entry breaks into quiet catalogue rules without changing
+% the content of the overview.
+\begingroup
+\renewcommand{\medskip}{\par\vspace{0.65em}\noindent\textcolor{ruleblue}{\rule{\textwidth}{0.45pt}}\par\vspace{0.15em}}
+\small
+
+
+
+\medskip
+1. \textbackslash\{\}*airport\_flows\_world\_bank\_corrected.gpkg
+Directory: processed\_data/infrastructure/airport/\par
+
+Description:\par
+World Bank airport flow data with origin and destination coordinates corrected using the corrected airport locations.\par
+
+Reference:\par
+Derived from World Bank and OurAirports.\par
+
+Produced by:\par
+Airports.py\par
+
+\medskip
+2. \textbackslash\{\}*airport\_osm\_features\_within\_2km.gpkg
+Directory: processed\_data/infrastructure/airport/\par
+
+Description:\par
+OSM airport lines and polygons located within 2 km of corrected World Bank airport points and assigned to the relevant airport.\par
+
+Reference:\par
+Derived from OpenStreetMap and corrected World Bank airport data.\par
+
+Produced by:\par
+airport\_shapefile\_nearest.py\par
+
+\medskip
+3. airport\_osm\_features\_within\_2km.xlsx
+Directory: processed\_data/infrastructure/airport/\par
+
+Description:\par
+Audit workbook containing matched OSM features, airport summaries and OSM tag summaries.\par
+
+Reference:\par
+Derived from OpenStreetMap and corrected World Bank airport data.\par
+
+Produced by:\par
+airport\_shapefile\_nearest.py\par
+
+\medskip
+4. airport\_coordinate\_audit.xlsx
+Directory: processed\_data/infrastructure/airport/\par
+
+Description:\par
+Audit spreadsheet showing which World Bank airport locations could be matched to the OurAirports dataset and therefore spatially corrected. It also allows unmatched World Bank airport points to be identified.\par
+
+Reference:\par
+Derived from World Bank and OurAirports.\par
+
+Produced by:\par
+Airports.py\par
+
+\medskip
+5. [country/region]\_[tag].parquet
+Directory: processed\_data/infrastructure/osm\_filter/\par
+
+Description:\par
+OSM features extracted for specified tags from the country or regional PBF files. Outputs are produced for individual countries and, where specified, for the wider study area.\par
+
+Reference:\par
+Derived from Geofabrik OpenStreetMap extracts.\par
+
+Produced by:\par
+OSM\_extract\_country\_loop.py\par
+
+\medskip
+6. [country/region].osm.pbf
+Directory: incoming\_data/osm/\par
+
+Description:\par
+Raw country or regional OpenStreetMap PBF extracts used as the source data for OSM feature extraction.\par
+
+Reference:\par
+\href{https://download.geofabrik.de/index.html}{\url{https://download.geofabrik.de/index.html}}\par
+
+Source/Produced by:\par
+Geofabrik / OpenStreetMap\par
+
+\medskip
+7. Countries\_list.xlsx
+Directory: incoming\_data/\par
+
+Description:\par
+List of all countries included in the study area.\par
+
+Reference:\par
+Created by Darcey Sutcliffe.\par
+
+Source/Produced by:\par
+Created by Darcey Sutcliffe\par
+
+\medskip
+8. filtered\_Ourairports.csv
+Directory: processed\_data/infrastructure/airport/\par
+
+Description:\par
+OurAirports data filtered to include small, medium and large airports within the study area.\par
+
+Reference:\par
+Derived from OurAirports.\par
+
+Produced by:\par
+Airports.py\par
+
+\medskip
+9. filtered\_Ourairports.gpkg
+Directory: processed\_data/infrastructure/airport/\par
+
+Description:\par
+Spatial version of the filtered OurAirports data containing small, medium and large airports within the study area.\par
+
+Reference:\par
+Derived from OurAirports.\par
+
+Produced by:\par
+Airports.py\par
+
+\medskip
+10. global\_maritime\_network\_PROVA\_NEW1.gpkg
+Directory: processed\_data/infrastructure/port/\par
+
+Description:\par
+Global maritime network containing port and maritime network nodes and the connections between them.\par
+
+Reference:\par
+Derived from maritime port data and PortWatch attributes.\par
+
+Produced by:\par
+ports.py\par
+
+\medskip
+11. \textbackslash\{\}*cleaned\_asia\_pacific\_maritime\_network\_PROVA\_NEW1.gpkg
+Directory: processed\_data/infrastructure/port/\par
+
+Description:\par
+Final cleaned Asia-Pacific maritime network created by combining the three separate network clusters.\par
+
+Reference:\par
+Derived from the northern Russia, large cluster and Pacific maritime networks.\par
+
+Produced by:\par
+ports.py\par
+
+\medskip
+12. asia\_pacific\_maritime\_network\_PROVA\_NEW1.gpkg
+Directory: processed\_data/infrastructure/port/\par
+
+Description:\par
+Asia-Pacific maritime network covering the study area and including connections between the separate network clusters.\par
+
+Reference:\par
+Derived from maritime port data and PortWatch attributes.\par
+
+Produced by:\par
+ports.py\par
+
+\medskip
+13. large\_cluster\_maritime\_network.gpkg
+Directory: processed\_data/infrastructure/port/\par
+
+Description:\par
+Maritime network representing the large cluster containing the majority of the Asian network nodes.\par
+
+Reference:\par
+Derived from maritime port data and PortWatch attributes.\par
+
+Produced by:\par
+ports.py\par
+
+\medskip
+14. northern\_russia\_network\_maritime\_network.gpkg
+Directory: processed\_data/infrastructure/port/\par
+
+Description:\par
+Maritime network representing the northern Russia cluster.\par
+
+Reference:\par
+Derived from maritime port data and PortWatch attributes.\par
+
+Produced by:\par
+ports.py\par
+
+\medskip
+15. pacific\_network\_maritime\_network.gpkg
+Directory: processed\_data/infrastructure/port/\par
+
+Description:\par
+Maritime network representing the Pacific cluster.\par
+
+Reference:\par
+Derived from maritime port data and PortWatch attributes.\par
+
+Produced by:\par
+ports.py\par
+
+\medskip
+16. port\_calls\_average\_2023-2025.csv
+Directory: incoming\_data/Global port supply-chains/\par
+
+Description:\par
+Port attribute data containing average port calls for 2023–2025.\par
+
+Reference:\par
+PortWatch, provided by Jasper Verschuur.\par
+\href{https://portwatch.imf.org/}{\url{https://portwatch.imf.org/}}\par
+
+\medskip
+17. port\_capacity\_called\_average\_2023-2025.csv
+Directory: incoming\_data/Global port supply-chains/\par
+
+Description:\par
+Port attribute data containing average port capacity called for 2023–2025.\par
+
+Reference:\par
+PortWatch, provided by Jasper Verschuur.\par
+\href{https://portwatch.imf.org/}{\url{https://portwatch.imf.org/}}\par
+
+\medskip
+18. port\_landuse.gpkg
+Directory: incoming\_data/infrastructure/port/\par
+
+Description:\par
+Polygon data representing maritime port land use.\par
+
+Reference:\par
+\href{https://data.mendeley.com/datasets/kdyt24tsh5/1}{\url{https://data.mendeley.com/datasets/kdyt24tsh5/1}}\par
+
+Source:\par
+Jasper Verschuur\par
+
+\medskip
+19. port\_landuse\_nearest\_port\_id\_lookup.xlsx
+Directory: processed\_data/infrastructure/port/\par
+
+Description:\par
+Lookup showing the nearest port assigned to each port land-use polygon before manual corrections were applied.\par
+
+Reference:\par
+Derived from port land-use data and the maritime network.\par
+
+Produced by:\par
+port\_shapefile\_nearest.py\par
+
+\medskip
+20. port\_landuse\_nearest\_port\_id\_lookup\_checked.xlsx
+Directory: incoming\_data/infrastructure/port/\par
+
+Description:\par
+Manually checked spreadsheet assessing whether the nearest port assigned to each port land-use polygon was correct. Where an incorrect match was identified, the correct port\_id was recorded.\par
+
+Reference:\par
+Created by Darcey Sutcliffe.\par
+
+Source/Produced by:\par
+Manual validation by Darcey Sutcliffe\par
+
+\medskip
+21. port\_landuse\_nearest\_port\_id\_lookup\_checked\_result.xlsx
+Directory: processed\_data/infrastructure/port/\par
+
+Description:\par
+Validation spreadsheet showing the original and final port\_id for each port land-use polygon, allowing confirmation that the manual corrections were applied correctly.\par
+
+Reference:\par
+Derived from the manually checked port lookup.\par
+
+Produced by:\par
+port\_shapefile\_nearest.py\par
+
+\medskip
+22. \textbackslash\{\}*port\_landuse\_nearest\_port\_ids.gpkg
+Directory: processed\_data/infrastructure/port/\par
+
+Description:\par
+Final GeoPackage containing the corrected relationship between each port land-use polygon and its corresponding port\_id.\par
+
+Reference:\par
+Derived from port land-use data and the maritime network, with manual corrections applied.\par
+
+Produced by:\par
+port\_shapefile\_nearest.py\par
+
+\medskip
+23. port\_turn\_around\_time\_average\_2023-2025.csv
+Directory: incoming\_data/Global port supply-chains/\par
+
+Description:\par
+Port attribute data containing average port turnaround time for 2023–2025.\par
+
+Reference:\par
+PortWatch, provided by Jasper Verschuur.\par
+\href{https://portwatch.imf.org/}{\url{https://portwatch.imf.org/}}\par
+
+\medskip
+24. Ports.csv
+Directory: incoming\_data/infrastructure/port/\par
+
+Description:\par
+Point locations of maritime ports.\par
+
+Reference:\par
+\href{https://data.mendeley.com/datasets/kdyt24tsh5/1}{\url{https://data.mendeley.com/datasets/kdyt24tsh5/1}}\par
+
+Source:\par
+Jasper Verschuur\par
+
+\medskip
+25. Ourairports.csv
+Directory: incoming\_data/infrastructure/Airport/\par
+
+Description:\par
+OurAirports airport attributes and coordinates. Export of all global data reported by OurAirports.\par
+
+Reference:\par
+\href{https://ourairports.com/data/}{\url{https://ourairports.com/data/}}\par
+
+Source/Produced by:\par
+External dataset\par
+
+\medskip
+26. utils\_new.py
+Directory: scripts/preprocess/ (if applicable)\par
+
+Description:\par
+Utility functions used by the preprocessing scripts. The script was copied from the African-transport-dataset project.\par
+
+Reference:\par
+African-transport-dataset/scripts/preprocess/\par
+
+Produced by:\par
+Copied and adapted from the African-transport-dataset project.\par
+
+\medskip
+27. worldbank\_filtered\_airport\_flows.gpkg
+Directory: incoming\_data/infrastructure/Airport/\par
+
+Description:\par
+World Bank airport flow data filtered to include only flows between airports within the study area.\par
+
+Reference:\par
+\href{https://datacatalog.worldbank.org/search/dataset/0038117/global-airports}{\url{https://datacatalog.worldbank.org/search/dataset/0038117/global-airports}}\par
+
+Source/Produced by:\par
+External dataset\par
+
+\medskip
+28. worldbank\_filtered\_airport\_volume.gpkg
+Directory: incoming\_data/infrastructure/Airport/\par
+
+Description:\par
+World Bank airport data filtered to include only countries within the study area.\par
+
+Reference:\par
+\href{https://datacatalog.worldbank.org/search/dataset/0038117/global-airports}{\url{https://datacatalog.worldbank.org/search/dataset/0038117/global-airports}}\par
+
+Source/Produced by:\par
+External dataset\par
+
+\medskip
+29. \textbackslash\{\}*world\_bank\_airports\_corrected.gpkg
+Directory: processed\_data/infrastructure/airport/\par
+
+Description:\par
+World Bank airport locations corrected using OurAirports coordinates where a matching IATA code was available. Original World Bank coordinates are retained where no matching OurAirports record was found.\par
+
+Reference:\par
+Derived from World Bank and OurAirports.\par
+
+Produced by:\par
+Airports.py\par
+
+\endgroup
+
+\end{document}
