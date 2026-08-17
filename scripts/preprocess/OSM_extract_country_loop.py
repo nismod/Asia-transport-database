@@ -241,8 +241,8 @@ def main(config):
     # ds list of OSM tag filters to extract (each tag is processed separately)
     tag_filters = [
         #{"aeroway": ["aerodrome"]},
-        {"aeroway": ["terminal"]},
-        {"aeroway": ["runway"]},
+        #{"aeroway": ["terminal"]},
+        #{"aeroway": ["runway"]},
         {"aeroway": ["taxiway"]},
         
     ]
