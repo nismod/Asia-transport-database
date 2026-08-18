@@ -5,7 +5,7 @@ import os
 import json
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 
 def load_config():
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -271,34 +271,80 @@ def label_audit_columns(frame, world_bank, ourairports):
     return frame.rename(columns=renamed)
 
 
-def apply_coordinate_corrections(incoming_data_path, output_path):
-    """Apply corrections based on the audit file's 'corrected' column."""
-    audit_file = os.path.join(incoming_data_path, "infrastructure", "Airport", "airport_coordinate_audit_corrected.xlsx")
-    
+def apply_coordinate_corrections(incoming_data_path, output_path, world_bank_layer=None):
+    """Apply manual airport corrections to the data layer when an audit file exists.
+
+    The audit may contain rows marked as 'remove', 'moved', or 'correct'. This routine
+    updates the actual World Bank airport layer for those records and saves a copy of the
+    applied audit workbook, while skipping gracefully when the audit file is not present.
+    """
+    audit_file = os.path.join(incoming_data_path, "infrastructure", "airport", "airport_coordinate_audit_corrected.xlsx")
+
+    if not os.path.exists(audit_file):
+        print(f"Skipping manual airport corrections: {audit_file} not found.")
+        return world_bank_layer
+
     audit = pd.read_excel(audit_file)
-    
+    if "Check" not in audit.columns:
+        raise ValueError(f"Manual audit file is missing the 'Check' column: {audit_file}")
+
     # Separate rows by correction status
-    moved_rows = audit[audit["Check"] == "moved"].copy()
-    remove_rows = audit[audit["Check"] == "remove"].copy()
-    correct_rows = audit[audit["Check"] == "correct"].copy()
-    
-    # For moved rows: replace coordinates with corrected values
-    moved_rows["merged_longitude"] = moved_rows["corrected_lon"]
-    moved_rows["merged_latitude"] = moved_rows["corrected_lat"]
-    
-    # Combine moved and correct rows (remove the "remove" rows)
+    moved_rows = audit[audit["Check"].astype(str).str.lower() == "moved"].copy()
+    remove_rows = audit[audit["Check"].astype(str).str.lower() == "remove"].copy()
+    correct_rows = audit[audit["Check"].astype(str).str.lower() == "correct"].copy()
+
+    # Save the corrected audit workbook as a record of the applied manual corrections.
     corrected_audit = pd.concat([moved_rows, correct_rows], ignore_index=True)
-    
-    # Save the corrected audit
     corrected_audit_file = os.path.join(output_path, "airport_coordinate_audit_applied.xlsx")
     corrected_audit.to_excel(corrected_audit_file, index=False)
-    
+
     print(f"Moved rows: {len(moved_rows)}")
     print(f"Removed rows: {len(remove_rows)}")
     print(f"Correct rows: {len(correct_rows)}")
     print(f"Saved corrected audit to: {corrected_audit_file}")
-    
-    return corrected_audit
+
+    if world_bank_layer is None:
+        return corrected_audit
+
+    merged = world_bank_layer.copy()
+    id_candidates = [col for col in ["Orig", "iata_code", "IATA", "airport_code", "code", "ICAO"] if col in merged.columns]
+    if not id_candidates:
+        return merged
+
+    id_col = id_candidates[0]
+
+    def normalize_code(value):
+        return str(value).strip().upper() if pd.notna(value) else ""
+
+    remove_ids = set(
+        normalize_code(code)
+        for code in remove_rows[id_col].tolist()
+        if pd.notna(code) and str(code).strip() != ""
+    )
+    if remove_ids:
+        merged = merged[
+            ~merged[id_col].astype(str).str.upper().str.strip().isin(remove_ids)
+        ].copy()
+
+    corrections = pd.concat([moved_rows, correct_rows], ignore_index=True)
+    if not corrections.empty and any(col in corrections.columns for col in ["corrected_lon", "corrected_lat"]):
+        correction_map = corrections[[id_col, "corrected_lon", "corrected_lat"]].dropna(subset=[id_col, "corrected_lon", "corrected_lat"])
+        if not correction_map.empty:
+            correction_map[id_col] = correction_map[id_col].map(normalize_code)
+            for _, row in correction_map.iterrows():
+                key = normalize_code(row[id_col])
+                matches = merged[merged[id_col].astype(str).str.upper().str.strip() == key]
+                for idx in matches.index:
+                    merged.at[idx, "Airport1Longitude"] = float(row["corrected_lon"])
+                    merged.at[idx, "Airport1Latitude"] = float(row["corrected_lat"])
+                    if "geometry" in merged.columns:
+                        merged.at[idx, "geometry"] = Point(float(row["corrected_lon"]), float(row["corrected_lat"]))
+
+    out_file = os.path.join(output_path, "world_bank_airports_corrected.gpkg")
+    merged.to_file(out_file, layer="airports_corrected", driver="GPKG")
+    print(f"Saved final corrected airport layer to: {out_file}")
+
+    return merged
 
 
 def main(config):
@@ -355,8 +401,8 @@ def main(config):
 
     print(f"Saved audit Excel file to: {excel_file}")
 
-    # Apply coordinate corrections from the corrected audit file
-    apply_coordinate_corrections(processed_data_path, output_path)
+    # Apply any manual airport removals/corrections from the audit file, if present.
+    apply_coordinate_corrections(incoming_data_path, output_path, merged)
 
 if __name__ == "__main__":
     CONFIG = load_config()
