@@ -20,18 +20,19 @@ def load_config():
 def filter_and_convert_airports(
     incoming_airport_path, incoming_data_path, output_path, airport_types
 ):
-    """Filter OurAirports data and write both CSV and GeoPackage outputs."""
+    #Filter OurAirports data and write both CSV and GeoPackage outputs.
+
     airports_file = os.path.join(incoming_airport_path, "Ourairports.csv")
     countries_file = os.path.join(incoming_data_path, "Countries_list.xlsx")
     filtered_csv = os.path.join(output_path, "filtered_Ourairports.csv")
     filtered_gpkg = os.path.join(output_path, "filtered_Ourairports.gpkg")
 
-    countries = pd.read_excel(countries_file, usecols="B", engine="openpyxl")
+    countries = pd.read_excel(countries_file, usecols="B", engine="openpyxl") # ds read column B (ISO2 country codes) from the countires in the study area, saved in countires_list 
     study_country_codes = {
         code
         for code in countries.iloc[:, 0].dropna().astype(str).str.strip().str.upper()
         if len(code) == 2 and code.isalpha()
-    }
+    } # ds clean the country codes to be 2 letter ISO codes and upper case
 
     airports = pd.read_csv(airports_file)
     required = {"type", "iso_country", "latitude_deg", "longitude_deg"}
@@ -39,19 +40,21 @@ def filter_and_convert_airports(
     if missing:
         raise ValueError(f"airports.csv is missing required columns: {sorted(missing)}")
 
+    # ds clean ISO2 Country codes in OurAiport dataset, and filter airport types
     filtered = airports[
         airports["iso_country"].astype(str).str.strip().str.upper().isin(study_country_codes)
         & airports["type"].isin(airport_types)
     ].copy()
-    filtered.to_csv(filtered_csv, index=False)
+    filtered.to_csv(filtered_csv, index=False) 
 
-    points = filtered.dropna(subset=["latitude_deg", "longitude_deg"]).copy()
+
+    points = filtered.dropna(subset=["latitude_deg", "longitude_deg"]).copy() # remove any rows with missing coordinates
     gdf = gpd.GeoDataFrame(
         points,
         geometry=gpd.points_from_xy(points["longitude_deg"], points["latitude_deg"]),
         crs="EPSG:4326",
     )
-    if os.path.exists(filtered_gpkg):
+    if os.path.exists(filtered_gpkg): # ds remove the file if it already exists 
         os.remove(filtered_gpkg)
     gdf.to_file(filtered_gpkg, layer="airports", driver="GPKG", index=False)
 
@@ -62,27 +65,17 @@ def filter_and_convert_airports(
 
 def merge_world_bank_with_ourairports(world_bank, ourairports, output_path, airport_path, crs):
     """Merge World Bank and OurAirports data."""
-    # ------------------------------------------------------------------
-    # Update these filenames if yours are different
-    # ------------------------------------------------------------------
+    
     wb_code_col = "Orig"  # ds wb = world bank
     oa_code_col = "iata_code"  # ds oa= ourairport
 
-    # ------------------------------------------------------------------
-    # Find the coordinate columns in OurAirports
-    # ------------------------------------------------------------------
     oa_lon_col = "longitude_deg"
     oa_lat_col = "latitude_deg"
-    # ------------------------------------------------------------------
-    # If World Bank already has coordinate columns, try to find them
-    # If not found, we'll rebuild geometry from the OurAirports match
-    # ------------------------------------------------------------------
+    
     wb_lon_col = "Airport1Longitude"
     wb_lat_col = "Airport1Latitude"
 
-    # ------------------------------------------------------------------
-    # Clean airport codes
-    # ------------------------------------------------------------------
+    # clean airport codes 
     world_bank[wb_code_col] = world_bank[wb_code_col].astype(str).str.upper().str.strip()
     ourairports[oa_code_col] = ourairports[oa_code_col].astype(str).str.upper().str.strip()
 
@@ -98,9 +91,8 @@ def merge_world_bank_with_ourairports(world_bank, ourairports, output_path, airp
             }
         )
     )
-    # ------------------------------------------------------------------
-    # Build audit table with all rows from both datasets
-    # ------------------------------------------------------------------
+
+    # Create an audit table to track matches and mismatches between the two datasets
     wb_audit = world_bank.copy()
     oa_audit = ourairports.copy()
 
@@ -144,9 +136,7 @@ def merge_world_bank_with_ourairports(world_bank, ourairports, output_path, airp
         how="left",  # ds keep everything from the world bank and add oa coordinates 
     )
 
-    # ------------------------------------------------------------------
-    # Replace World Bank coordinates where a match exists
-    # ------------------------------------------------------------------
+    
     if wb_lon_col is not None and wb_lat_col is not None:  # only if no data sets are missing
         merged[wb_lon_col] = merged["oa_lon"].combine_first(merged[wb_lon_col])  # ds replace the world bank coordinates with ourairports, if airport data is missing keep the original world bank data
         merged[wb_lat_col] = merged["oa_lat"].combine_first(merged[wb_lat_col])
@@ -166,14 +156,10 @@ def merge_world_bank_with_ourairports(world_bank, ourairports, output_path, airp
             crs=crs
         )
 
-    # ------------------------------------------------------------------
-    # Cleanup helper columns
-    # ------------------------------------------------------------------
+    
     merged = merged.drop(columns=[oa_code_col, "oa_lon", "oa_lat"], errors="ignore")  # ds removes oa data
 
-    # ------------------------------------------------------------------
-    # Save output
-    # ------------------------------------------------------------------
+    # save output to a GeoPackage file
     out_file = os.path.join(output_path, "world_bank_airports_corrected.gpkg")
     merged.to_file(out_file, layer="airports_corrected", driver="GPKG")
 
@@ -206,19 +192,19 @@ def process_airport_flows(airport_path, output_path, ourairports, oa_lat_col, oa
     # Clean codes
     flows[orig_col] = flows[orig_col].astype(str).str.upper().str.strip()
     flows[dest_col] = flows[dest_col].astype(str).str.upper().str.strip()
-    iata_col = "iata_code" 
+    iata_col = "Orig"
     ourairports[iata_col] = ourairports[iata_col].astype(str).str.upper().str.strip()
 
     # Build lookup tables from OurAirports
     oa_lookup = (
-        ourairports[[iata_col, oa_lat_col, oa_lon_col]]
+        ourairports[[iata_col, "Airport1Latitude", "Airport1Longitude"]]
         .dropna(subset=[iata_col])
         .drop_duplicates(subset=[iata_col])  # ds remove any with the same iata codes
         .set_index(iata_col)
     )
 
-    lat_map = oa_lookup[oa_lat_col]  # ds seperate lat look up 
-    lon_map = oa_lookup[oa_lon_col]
+    lat_map = oa_lookup["Airport1Latitude"]  # ds seperate lat look up 
+    lon_map = oa_lookup["Airport1Longitude"]
 
     # Replace World Bank coordinates with OurAirports coordinates
     flows[lat1_col] = flows[orig_col].map(lat_map)  # ds matches iata codes and replaces the wb data with oa
@@ -273,13 +259,11 @@ def label_audit_columns(frame, world_bank, ourairports):
 
 def apply_coordinate_corrections(incoming_data_path, output_path, world_bank_layer=None):
     """Apply manual airport corrections to the data layer when an audit file exists.
-
-    The audit may contain rows marked as 'remove', 'moved', or 'correct'. This routine
-    updates the actual World Bank airport layer for those records and saves a copy of the
-    applied audit workbook, while skipping gracefully when the audit file is not present.
+       The audit may contain rows marked as 'remove', 'moved', or 'correct', done through manually checking. 
     """
     audit_file = os.path.join(incoming_data_path, "infrastructure", "airport", "airport_coordinate_audit_corrected.xlsx")
 
+    # Check for audit correrctions file 
     if not os.path.exists(audit_file):
         print(f"Skipping manual airport corrections: {audit_file} not found.")
         return world_bank_layer
@@ -294,7 +278,7 @@ def apply_coordinate_corrections(incoming_data_path, output_path, world_bank_lay
     correct_rows = audit[audit["Check"].astype(str).str.lower() == "correct"].copy()
 
     # Save the corrected audit workbook as a record of the applied manual corrections.
-    corrected_audit = pd.concat([moved_rows, correct_rows], ignore_index=True)
+    corrected_audit = pd.concat([moved_rows, correct_rows], ignore_index=True) 
     corrected_audit_file = os.path.join(output_path, "airport_coordinate_audit_applied.xlsx")
     corrected_audit.to_excel(corrected_audit_file, index=False)
 
@@ -307,32 +291,54 @@ def apply_coordinate_corrections(incoming_data_path, output_path, world_bank_lay
         return corrected_audit
 
     merged = world_bank_layer.copy()
-    id_candidates = [col for col in ["Orig", "iata_code", "IATA", "airport_code", "code", "ICAO"] if col in merged.columns]
-    if not id_candidates:
-        return merged
+    
+    id_col = "Orig"
+    if id_col not in merged.columns:
+        raise KeyError(f"Missing required airport ID column: {id_col}")
 
-    id_col = id_candidates[0]
+    audit_id_candidates = [
+        id_col,
+        f"WorldBank_{id_col}",
+        f"OurAirports_{id_col}",
+    ]
+
+    def find_audit_id_column(frame):
+        for column in audit_id_candidates:
+            if column in frame.columns:
+                return column
+        return None
+
+    remove_id_col = find_audit_id_column(remove_rows)
+    correction_rows = pd.concat([moved_rows, correct_rows], ignore_index=True)
+    correction_id_col = find_audit_id_column(correction_rows)
+
+    if remove_id_col is None and not remove_rows.empty:
+        raise KeyError(f"Could not find an airport ID column in the removal audit. Expected one of: {audit_id_candidates}")
+    if correction_id_col is None and not correction_rows.empty:
+        raise KeyError(f"Could not find an airport ID column in the correction audit. Expected one of: {audit_id_candidates}")
 
     def normalize_code(value):
         return str(value).strip().upper() if pd.notna(value) else ""
 
-    remove_ids = set(
-        normalize_code(code)
-        for code in remove_rows[id_col].tolist()
-        if pd.notna(code) and str(code).strip() != ""
-    )
+    remove_ids = set()
+    if remove_id_col is not None:
+        remove_ids = {
+            normalize_code(code)
+            for code in remove_rows[remove_id_col].tolist()
+            if pd.notna(code) and str(code).strip() != ""
+        }
     if remove_ids:
         merged = merged[
             ~merged[id_col].astype(str).str.upper().str.strip().isin(remove_ids)
         ].copy()
 
-    corrections = pd.concat([moved_rows, correct_rows], ignore_index=True)
-    if not corrections.empty and any(col in corrections.columns for col in ["corrected_lon", "corrected_lat"]):
-        correction_map = corrections[[id_col, "corrected_lon", "corrected_lat"]].dropna(subset=[id_col, "corrected_lon", "corrected_lat"])
+    corrections = correction_rows
+    if correction_id_col is not None and not corrections.empty and any(col in corrections.columns for col in ["corrected_lon", "corrected_lat"]):
+        correction_map = corrections[[correction_id_col, "corrected_lon", "corrected_lat"]].dropna(subset=[correction_id_col, "corrected_lon", "corrected_lat"])
         if not correction_map.empty:
-            correction_map[id_col] = correction_map[id_col].map(normalize_code)
+            correction_map[correction_id_col] = correction_map[correction_id_col].map(normalize_code)
             for _, row in correction_map.iterrows():
-                key = normalize_code(row[id_col])
+                key = normalize_code(row[correction_id_col])
                 matches = merged[merged[id_col].astype(str).str.upper().str.strip() == key]
                 for idx in matches.index:
                     merged.at[idx, "Airport1Longitude"] = float(row["corrected_lon"])
@@ -351,8 +357,6 @@ def main(config):
 
     crs="EPSG:4326"
 
-    
-
     incoming_data_path = config["paths"]["incoming_data"]
     processed_data_path = config["paths"]["processed_data"]
 
@@ -360,12 +364,11 @@ def main(config):
     output_path = os.path.join(processed_data_path, "infrastructure", "airport")
     os.makedirs(output_path, exist_ok=True)
 
+    #Extract AIRPORT_TYPES from the the OurAirport dataset
     AIRPORT_TYPES = {"medium_airport", "large_airport", "small_airport"}
     filter_and_convert_airports(airport_path, incoming_data_path, output_path, AIRPORT_TYPES)
 
-    # ------------------------------------------------------------------
-    # Update these filenames if yours are different
-    # ------------------------------------------------------------------
+    # dataset [paths] (filtered to only countires in the study area)
     world_bank_file = os.path.join(airport_path, "worldbank_filtered_airport_volume.gpkg")
     ourairports_file = os.path.join(output_path, "filtered_Ourairports.gpkg")
 
@@ -377,7 +380,10 @@ def main(config):
         world_bank, ourairports, output_path, airport_path, crs
     )
 
-    process_airport_flows(airport_path, output_path, ourairports, oa_lat_col, oa_lon_col, crs)
+    # Apply any manual airport removals/corrections from the audit file, if present.
+    merged = apply_coordinate_corrections(incoming_data_path, output_path, merged)
+
+    process_airport_flows(airport_path, output_path, merged, oa_lat_col, oa_lon_col, crs)
 
     # excel file with oa, wb original data and the merged point coordinates and outlines any points that did not match up from both datasets
     excel_file = os.path.join(output_path, "airport_coordinate_audit.xlsx")
@@ -400,9 +406,6 @@ def main(config):
         match_summary.to_excel(writer, sheet_name="match_summary", index=False)
 
     print(f"Saved audit Excel file to: {excel_file}")
-
-    # Apply any manual airport removals/corrections from the audit file, if present.
-    apply_coordinate_corrections(incoming_data_path, output_path, merged)
 
 if __name__ == "__main__":
     CONFIG = load_config()
