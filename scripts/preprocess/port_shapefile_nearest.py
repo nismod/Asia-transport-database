@@ -9,69 +9,13 @@ import pandas as pd
 from utils_new import load_config
 
 
-EXTRA_ASIA_ISO3 = {"RUS", "TUR", "GEO", "ARM", "AZE", "CYP"} #ds extra countires that might not come under Asia or Pacific
-REGION_COUNTRY_ALLOWLIST = {
-    "northern_russia": {"RUS"},
-    "pacific": None,
-}
-
-COUNTRY_ALIASES = { # alternative names for countries, abd there iso standard name
-    "south korea": "Korea, Republic of",
-    "korea republic of": "Korea, Republic of",
-    "korea": "Korea, Republic of",
-    "republic of korea": "Korea, Republic of",
-    "south korea republic of": "Korea, Republic of",
-    "north korea": "Korea (Democratic People's Republic of)",
-    "korea democratic people republic of": "Korea (Democratic People's Republic of)",
-    "democratic peoples republic of korea": "Korea (Democratic People's Republic of)",
-    "north korea democratic peoples republic of": "Korea (Democratic People's Republic of)",
-    "russia": "Russian Federation",
-    "russian federation": "Russian Federation",
-    "ussr": "Russian Federation",
-    "soviet union": "Russian Federation",
-    "viet nam": "Viet Nam",
-    "vietnam": "Viet Nam",
-    "turkey": "Türkiye",
-    "turkiye": "Türkiye",
-    "turkish republic": "Türkiye",
-    "türkiye": "Türkiye",
-    "turk republic": "Türkiye",
-    "turkey republic": "Türkiye",
-    "taiwan": "Taiwan, Province of China",
-    "taiwan province of china": "Taiwan, Province of China",
-    "hong kong": "Hong Kong",
-    "macao": "Macao",
-    "macau": "Macao",
-    "brunei": "Brunei Darussalam",
-    "brunei darussalam": "Brunei Darussalam",
-    "east timor": "Timor-Leste",
-    "timor leste": "Timor-Leste",
-    "palestine": "Palestine, State of",
-    "palestine state of": "Palestine, State of",
-    "iran": "Iran (Islamic Republic of)",
-    "iran islamic republic of": "Iran (Islamic Republic of)",
-    "micronesia": "Micronesia (Federated States of)",
-    "micronesia federated states of": "Micronesia (Federated States of)",
-    "syrian arab republic": "Syrian Arab Republic",
-    "the netherlands": "Netherlands",
-    "netherlands": "Netherlands",
-    "holland": "Netherlands",
-    "dutch republic": "Netherlands",
-    "united kingdom": "United Kingdom",
-    "uk": "United Kingdom",
-    "great britain": "United Kingdom",
-    "britain": "United Kingdom",
-    "england": "United Kingdom",
-    "scotland": "United Kingdom",
-    "wales": "United Kingdom",
-    "northern ireland": "United Kingdom",
-}
-
 CHECKED_KEY_COLUMNS = ["port_name", "country", "continent", "area", "type", "sector", "land_use"]
 CHECKED_ID_COLUMN = "correct port ID"
 
 
-def _normalise_checked_value(value): # ds normalise the values removes spaces and converts to string
+def _normalise_checked_value(value): 
+#normalise the values removes spaces and converts to string
+
     if pd.isna(value):
         return ""
     if isinstance(value, float):
@@ -80,7 +24,8 @@ def _normalise_checked_value(value): # ds normalise the values removes spaces an
 
 
 def apply_checked_nearest_port_ids(nearest, checked_xlsx, output_path):
-    """Apply manually checked IDs and save a corrected copy of the layer."""
+    #Apply manually checked IDs and save a corrected copy of the layer.
+    
     if not os.path.exists(checked_xlsx):
         print(f"Checked workbook not found; skipping corrections: {checked_xlsx}")
         nearest.to_file(output_path, layer="port_landuse", driver="GPKG")
@@ -131,7 +76,8 @@ def apply_checked_nearest_port_ids(nearest, checked_xlsx, output_path):
 
 
 def write_checked_id_audit(original, corrected, node_polygon_audit, output_xlsx):
-    """Write a workbook showing the generated and final nearest-port IDs."""
+    #Write an audit showing the generated and final nearest-port IDs.
+
     audit_columns = [
         column for column in CHECKED_KEY_COLUMNS
         if column in original.columns
@@ -161,7 +107,8 @@ def write_checked_id_audit(original, corrected, node_polygon_audit, output_xlsx)
 
 
 def normalize_country(value):
-    """Normalize a country name or ISO token for robust matching."""
+    #Normalize a country name or ISO 
+
     if pd.isna(value): # ds checked wheter value is missing
         return ""
 
@@ -171,8 +118,9 @@ def normalize_country(value):
     return value.strip() #ds removes spaces from beginning and end
 
 
-def load_country_iso_allow_list(countries_xlsx):
-    """Load the country workbook and return the ISO3 allow-list and name lookup."""
+def load_country_iso_allow_list(countries_xlsx, country_aliases):
+    #Load the country list and return the ISO3 allow-list and name lookup.
+
     if not os.path.exists(countries_xlsx): #ds check excel sheet exists there
         raise FileNotFoundError(f"Countries workbook not found: {countries_xlsx}")
 
@@ -211,7 +159,7 @@ def load_country_iso_allow_list(countries_xlsx):
             )
         country_lookup[key] = iso3 # matches the county and iso in a dictonary 
 
-    for alias, canonical in COUNTRY_ALIASES.items(): # ds checks alternative country names
+    for alias, canonical in country_aliases.items(): # ds checks alternative country names
         canonical_norm = normalize_country(canonical)
         if canonical_norm in country_lookup:
             country_lookup[normalize_country(alias)] = country_lookup[canonical_norm] # replace all the names so they are now iso3 standard named
@@ -220,7 +168,8 @@ def load_country_iso_allow_list(countries_xlsx):
 
 
 def country_to_iso3(country_value, country_lookup):
-    """Map a landuse country string to the workbook ISO3 code when possible."""
+    #Map a landuse country string to the workbook ISO3 code when possible.
+    
     if pd.isna(country_value): # ds if there is a country value missing in landuse return a panda missing value
         return pd.NA
 
@@ -231,13 +180,13 @@ def country_to_iso3(country_value, country_lookup):
     return country_lookup.get(value, pd.NA) # ds searches for the corresponding iso3 value for the value in country_lookup, if not returns NA 
 
 
-def apply_region_country_filter(landuse_gdf, region_name, allowed_iso3):
-    """Keep only the ISO3 countries allowed for the study area
-    """
+def apply_region_country_filter(landuse_gdf, region_name, allowed_iso3, region_country_allowlist):
+    #Keep only the ISO3 countries allowed for the study area
+    
     if region_name is None:
         return landuse_gdf.loc[landuse_gdf["country_iso3"].isin(allowed_iso3)].copy() # ds if no region is specified, return all landuse records that are in the allowed_iso3 set
 
-    region_allowed = REGION_COUNTRY_ALLOWLIST.get(region_name) # ds is the region in the allowed list
+    region_allowed = region_country_allowlist.get(region_name) # ds is the region in the allowed list
     if region_allowed is None:
         return landuse_gdf.loc[landuse_gdf["country_iso3"].isin(allowed_iso3)].copy()
 
@@ -246,7 +195,8 @@ def apply_region_country_filter(landuse_gdf, region_name, allowed_iso3):
 
 
 def build_nearest_port_lookup(landuse_gdf, network_ports):
-    """Use nearest-point matching against the full processed network port node layer."""
+    #Use nearest-point matching against the full processed network port node layer.
+    
     # Only keep port nodes for the nearest-port lookup.
     network_ports = network_ports.loc[network_ports["infra"] == "port"].copy() # ds extract the ports (exlcudes maritime nodes)
 
@@ -280,6 +230,64 @@ def build_nearest_port_lookup(landuse_gdf, network_ports):
 
 
 def main(config):
+    REGION_COUNTRY_ALLOWLIST = {
+        "northern_russia": {"RUS"},
+        "pacific": None,
+    }
+
+    EXTRA_ASIA_ISO3 = {"RUS", "TUR", "GEO", "ARM", "AZE", "CYP"} #ds extra countires that might not come under Asia or Pacific
+    COUNTRY_ALIASES = { # alternative names for countries, abd there iso standard name
+        "south korea": "Korea, Republic of",
+        "korea republic of": "Korea, Republic of",
+        "korea": "Korea, Republic of",
+        "republic of korea": "Korea, Republic of",
+        "south korea republic of": "Korea, Republic of",
+        "north korea": "Korea (Democratic People's Republic of)",
+        "korea democratic people republic of": "Korea (Democratic People's Republic of)",
+        "democratic peoples republic of korea": "Korea (Democratic People's Republic of)",
+        "north korea democratic peoples republic of": "Korea (Democratic People's Republic of)",
+        "russia": "Russian Federation",
+        "russian federation": "Russian Federation",
+        "ussr": "Russian Federation",
+        "soviet union": "Russian Federation",
+        "viet nam": "Viet Nam",
+        "vietnam": "Viet Nam",
+        "turkey": "Türkiye",
+        "turkiye": "Türkiye",
+        "turkish republic": "Türkiye",
+        "türkiye": "Türkiye",
+        "turk republic": "Türkiye",
+        "turkey republic": "Türkiye",
+        "taiwan": "Taiwan, Province of China",
+        "taiwan province of china": "Taiwan, Province of China",
+        "hong kong": "Hong Kong",
+        "macao": "Macao",
+        "macau": "Macao",
+        "brunei": "Brunei Darussalam",
+        "brunei darussalam": "Brunei Darussalam",
+        "east timor": "Timor-Leste",
+        "timor leste": "Timor-Leste",
+        "palestine": "Palestine, State of",
+        "palestine state of": "Palestine, State of",
+        "iran": "Iran (Islamic Republic of)",
+        "iran islamic republic of": "Iran (Islamic Republic of)",
+        "micronesia": "Micronesia (Federated States of)",
+        "micronesia federated states of": "Micronesia (Federated States of)",
+        "syrian arab republic": "Syrian Arab Republic",
+        "the netherlands": "Netherlands",
+        "netherlands": "Netherlands",
+        "holland": "Netherlands",
+        "dutch republic": "Netherlands",
+        "united kingdom": "United Kingdom",
+        "uk": "United Kingdom",
+        "great britain": "United Kingdom",
+        "britain": "United Kingdom",
+        "england": "United Kingdom",
+        "scotland": "United Kingdom",
+        "wales": "United Kingdom",
+        "northern ireland": "United Kingdom",
+    }
+
     incoming_data_path = config["paths"]["incoming_data"]
     processed_data_path = config["paths"]["processed_data"]
 
@@ -299,7 +307,7 @@ def main(config):
     network_ports = gpd.read_file(network_gpkg, layer="port_nodes")
 
     # Load country ISO reference list.
-    country_ref, country_lookup, allowed_iso3 = load_country_iso_allow_list(countries_xlsx)
+    country_ref, country_lookup, allowed_iso3 = load_country_iso_allow_list(countries_xlsx, COUNTRY_ALIASES)
     allowed_iso3 = allowed_iso3.union(EXTRA_ASIA_ISO3) # ds assure all iso3 in strudy area are included
 
     # Map landuse country names into the workbook ISO3 set first.
@@ -310,7 +318,12 @@ def main(config):
     landuse_gdf = landuse_gdf.loc[landuse_gdf["country_in_allowed_list"]].copy()
 
     # ds Filter to only include relevant countries in the study area
-    landuse_gdf = apply_region_country_filter(landuse_gdf, region_name=None, allowed_iso3=allowed_iso3)
+    landuse_gdf = apply_region_country_filter(
+        landuse_gdf,
+        region_name=None,
+        allowed_iso3=allowed_iso3,
+        region_country_allowlist=REGION_COUNTRY_ALLOWLIST,
+    )
 
     # Normalize the landuse country labels for reporting.
     landuse_gdf["country_norm"] = landuse_gdf["country"].apply(normalize_country)
