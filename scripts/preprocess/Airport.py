@@ -17,9 +17,7 @@ def load_config():
     return config
 
 
-def filter_and_convert_airports(
-    incoming_airport_path, incoming_data_path, output_path, airport_types
-):
+def filter_and_convert_airports(incoming_airport_path, incoming_data_path, output_path, airport_types):
     #Filter OurAirports data and write both CSV and GeoPackage outputs.
 
     airports_file = os.path.join(incoming_airport_path, "Ourairports.csv")
@@ -64,7 +62,7 @@ def filter_and_convert_airports(
 
 
 def merge_world_bank_with_ourairports(world_bank, ourairports, output_path, airport_path, crs):
-    """Merge World Bank and OurAirports data."""
+    #Merge World Bank and OurAirports data, keeping world bank rows and adding OurAirports coordinates where available. 
     
     wb_code_col = "Orig"  # ds wb = world bank
     oa_code_col = "iata_code"  # ds oa= ourairport
@@ -169,7 +167,7 @@ def merge_world_bank_with_ourairports(world_bank, ourairports, output_path, airp
 
 
 def process_airport_flows(airport_path, output_path, ourairports, oa_lat_col, oa_lon_col, crs):
-    """Process World Bank airport flows data."""
+    #Move world bank airport flows to corrected coordiantes
     world_bank_file = os.path.join(airport_path, "worldbank_filtered_airport_flows.gpkg")
 
     flows = gpd.read_file(world_bank_file)
@@ -234,7 +232,7 @@ def process_airport_flows(airport_path, output_path, ourairports, oa_lat_col, oa
 
 
 def label_audit_columns(frame, world_bank, ourairports):
-    """Make the source of exported audit columns explicit."""
+    # add sources to columns names of the audit
     world_bank_columns = set(world_bank.columns)
     ourairports_columns = set(ourairports.columns)
     renamed = {}
@@ -291,7 +289,7 @@ def apply_coordinate_corrections(incoming_data_path, output_path, world_bank_lay
         return corrected_audit
 
     merged = world_bank_layer.copy()
-    
+
     id_col = "Orig"
     if id_col not in merged.columns:
         raise KeyError(f"Missing required airport ID column: {id_col}")
