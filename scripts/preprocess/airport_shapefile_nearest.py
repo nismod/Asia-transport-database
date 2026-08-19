@@ -122,6 +122,7 @@ def add_source_columns(matches, airports, osm_features):
 
 
 def build_audits(matches, airports):
+    # create excel audit sheet
     """Create matched-shapes, airport-summary, and tag-summary tables."""
 
     matches["osm_geometry_type"] = matches.geometry.geom_type
@@ -220,7 +221,8 @@ def write_outputs(
     output_directory,
     source_locations,
 ):
-    """Write the matched GeoPackage and Excel audit workbook."""
+    
+    #Write the matched GeoPackage and Excel audit workbook.
     output_directory.mkdir(parents=True, exist_ok=True)
     gpkg_file = output_directory / "airport_osm_features_within_2km.gpkg"
     excel_file = output_directory / "airport_osm_features_within_2km.xlsx"
@@ -235,6 +237,7 @@ def write_outputs(
     )
 
     def add_source_location_to_headers(frame):
+        # Add source location to column headers for Excel audit workbook.
         renamed = {}
         for column in frame.columns:
             if column.startswith("OSM_tag_count_"):
