@@ -213,15 +213,7 @@ def build_audits(matches, airports):
     return matched_shapes, airport_summary, tag_summary
 
 
-def write_outputs(
-    matches,
-    matched_shapes,
-    airport_summary,
-    tag_summary,
-    output_directory,
-    source_locations,
-):
-    
+def write_outputs(matches, matched_shapes, airport_summary, tag_summary, output_directory, source_locations):
     #Write the matched GeoPackage and Excel audit workbook.
     output_directory.mkdir(parents=True, exist_ok=True)
     gpkg_file = output_directory / "airport_osm_features_within_2km.gpkg"
