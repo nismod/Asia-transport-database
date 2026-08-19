@@ -11,6 +11,7 @@ from utils_new import load_config
 
 def get_paths(config: dict, transport_mode: str) -> tuple[Path, Path, Path, Path]:
     # ds gets paths for input and output files based on the transport mode and config
+
     paths = config["paths"]
     processed_data = Path(paths["processed_data"])
 
@@ -30,6 +31,7 @@ def get_paths(config: dict, transport_mode: str) -> tuple[Path, Path, Path, Path
 
 def load_edges_dataset(results_dir: Path, folder_name: str) -> gpd.GeoDataFrame: # ds outputs the geopandas dataframe for the edges dataset
     #ds Load and label one OpenGIRA edges dataset
+
     edges_file = results_dir / folder_name / "edges.gpq"
     if not edges_file.exists():
         raise FileNotFoundError(f"Could not find edges.gpq in: {edges_file.parent}")
@@ -46,6 +48,7 @@ def load_edges_dataset(results_dir: Path, folder_name: str) -> gpd.GeoDataFrame:
 
 def load_nodes_dataset(results_dir: Path, folder_name: str, transport_mode: str) -> gpd.GeoDataFrame:
     #ds Load and label one OpenGIRA nodes dataset
+
     nodes_file = results_dir / folder_name / "nodes.gpq"
     if not nodes_file.exists():
         raise FileNotFoundError(f"Could not find nodes.gpq in: {nodes_file.parent}")
@@ -70,6 +73,7 @@ def load_nodes_dataset(results_dir: Path, folder_name: str, transport_mode: str)
 
 def combine_edges(priority: tuple[str, ...], config: dict, transport_mode: str) -> Path:
     #ds Combine edges from available opengira data and write the dataset.
+
     results_dir, output_dir, output_file, _ = get_paths(config, transport_mode)
     output_dir.mkdir(parents=True, exist_ok=True) # ds creates the output directory if it does not exist
 
@@ -110,6 +114,7 @@ def combine_edges(priority: tuple[str, ...], config: dict, transport_mode: str) 
 
 def combine_nodes(priority: tuple[str, ...], config: dict, transport_mode: str) -> Path:
     #ds Combine nodes from available opengira data and write the dataset.
+    
     results_dir, output_dir, _, nodes_output_file = get_paths(config, transport_mode)
     output_dir.mkdir(parents=True, exist_ok=True)
 
