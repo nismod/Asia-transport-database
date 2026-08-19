@@ -32,20 +32,6 @@ def get_continent(x):
     else:
         return x
 
-EXTRA_ASIA_ISO3 = {
-    "RUS",  # Russia
-    "TUR",  # Turkey
-    "GEO",  # Georgia
-    "ARM",  # Armenia
-    "AZE",  # Azerbaijan
-    "CYP",  # Cyprus
-}
-
-
-def get_extra_asia_iso3(continent):
-    return EXTRA_ASIA_ISO3 if continent == "Asia & Pacific" else set()
-
-
 def normalize_port_nodes(nodes_gdf, extra_asia_iso3=None):
     if "name" in nodes_gdf.columns:
         # keep the existing country column unchanged
@@ -263,6 +249,14 @@ def combine_asia_pacific_clusters(processed_data_path):
 def main(config):
 
     continent = "Asia & Pacific" #Asia & Pacific, Africa 
+    extra_asia_iso3 = {
+        "RUS",  # Russia
+        "TUR",  # Turkey
+        "GEO",  # Georgia
+        "ARM",  # Armenia
+        "AZE",  # Azerbaijan
+        "CYP",  # Cyprus
+    } if continent == "Asia & Pacific" else set()
 
     incoming_data_path = config['paths']['incoming_data']
     processed_data_path = config['paths']['processed_data']
@@ -270,7 +264,7 @@ def main(config):
     os.makedirs(port_output_dir, exist_ok=True)
     countries_xlsx = os.path.join(incoming_data_path, "Countries_list.xlsx")
     allowed_iso3 = load_country_iso_allow_list(countries_xlsx)
-    allowed_iso3 = allowed_iso3.union(EXTRA_ASIA_ISO3)
+    allowed_iso3 = allowed_iso3.union(extra_asia_iso3)
     
     epsg_meters = 3395 # To convert geometries to measure distances in meters
     cutoff_distance = 6600 # We assume ports within 6.6km are the same
@@ -291,7 +285,6 @@ def main(config):
 
     df["continent"] = df["Continent_Code"].progress_apply(get_continent)
 
-    extra_asia_iso3 = get_extra_asia_iso3(continent)
     df.loc[df["iso3"].isin(extra_asia_iso3), "continent"] = "Asia & Pacific"
 
     df_edges = gpd.read_file(os.path.join(processed_data_path,
