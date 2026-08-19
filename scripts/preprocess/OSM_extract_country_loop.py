@@ -25,14 +25,16 @@ def load_config():
 
 
 def normalize_country_slug(country_name): # ds function to convert a country name into the slug format used by Geofabrik extracts
-    """Convert a country name into the slug format used by Geofabrik extracts."""
+    #Convert a country name into the slug format used by Geofabrik extracts.
+
     slug = re.sub(r"[^a-z0-9]+", "-", str(country_name).strip().lower()) # ds convert the country name to lowercase, remove leading/trailing whitespace, and replace any non-alphanumeric characters with a hyphen
     slug = slug.strip("-") # ds remove any leading/trailing hyphens
     return slug
 
 
 def load_country_records(config): # ds function to read the Countries_list_osm.xlsx file and return a list of the geofabrik name for each country and the corresponding region   
-    """Read Countries_list_osm.xlsx and return country/region records."""
+    #Read Countries_list_osm.xlsx and return country/region records.
+
     incoming_data_path = config['paths']['incoming_data']
     countries_path = os.path.join(incoming_data_path, "Countries_list_osm.xlsx")
     country_df = pd.read_excel(countries_path) # ds read the excel file into a pandas dataframe
@@ -56,7 +58,8 @@ def load_country_records(config): # ds function to read the Countries_list_osm.x
 
 
 def build_tag_label(tags_filter):
-    """Use the first tag key/value pair as the output label."""
+    #Use the first tag key/value pair as the output label.
+
     if not tags_filter:
         return "unspecified_tag"
 
@@ -70,7 +73,8 @@ def build_tag_label(tags_filter):
 
 
 def download_country_pbf(config, country_name, region):
-    """Download a country extract into incoming_data/osm and return its local path."""
+    #Download a country extract into incoming_data/osm and return its local path.
+
     incoming_data_path = config['paths']['incoming_data']
     osm_dir = os.path.join(incoming_data_path, "osm")
     
@@ -94,7 +98,8 @@ def download_country_pbf(config, country_name, region):
 
 
 def process_country_pbf(config, country_name, tags_filter, region):
-    """Download one country PBF, save it into incoming_data/osm, and convert it to parquet."""
+    #Download one country PBF, save it into incoming_data/osm, and convert it to parquet.
+
     processed_data_path = config["paths"]["processed_data"]
     slug = normalize_country_slug(country_name)
     tag_label = build_tag_label(tags_filter)
@@ -163,7 +168,8 @@ def process_country_pbf(config, country_name, tags_filter, region):
     return out_path  
 
 def write_tag_summary(processed_data_path, tag_labels):
-    """Write the list of tag labels used in this run."""
+    #Write the list of tag labels used in this run.
+
     summary_path = os.path.join(
         processed_data_path,
         "infrastructure",
@@ -180,7 +186,8 @@ def write_tag_summary(processed_data_path, tag_labels):
 
 
 def combine_country_parquets(config, tags_filter, append_existing=False, new_files=None):
-    """Combine all country parquet files for one tag into a single continent-wide file."""
+    #Combine all country parquet files for one tag into a single continent-wide file.
+
     processed_data_path = config["paths"]["processed_data"]
     tag_label = build_tag_label(tags_filter)
 
@@ -235,10 +242,11 @@ def combine_country_parquets(config, tags_filter, append_existing=False, new_fil
     print(f"Saved combined parquet to {output_path}")
 
 def main(config):
-    """Loop through a supplied country list, falling back to the workbook if needed."""
+    #Loop through a supplied country list
 
-    countries = ["russia"] # if none use spreadsheet, otherwise ["vietnam"]
+    countries = None # if =None use spreadsheet countries_list, otherwise ["vietnam"]
     # ds list of OSM tag filters to extract (each tag is processed separately)
+    
     tag_filters = [
         #{"aeroway": ["aerodrome"]},
         #{"aeroway": ["terminal"]},
@@ -305,7 +313,10 @@ def main(config):
             new_files=processed_files,
         )
 
- 
+if __name__ == '__main__':
+    CONFIG = load_config()
+    main(CONFIG)
+
 ''' list of tags to filter for  OSM data
                 #"aeroway": ["terminal"],
                 #"building": ["terminal", "transportation"],
@@ -317,7 +328,3 @@ def main(config):
                 #"port": True,
                 #"aeroway": ["aerodrome"],
 '''
-
-if __name__ == '__main__':
-    CONFIG = load_config()
-    main(CONFIG)
