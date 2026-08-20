@@ -144,9 +144,12 @@ port_shapefile_nearest.py:
 ports.py:
     Incoming data:
         -Directory: incoming_data/infrastructure/port/ and incoming_data/Global port supply-chains/
-            -Ports.csv: 
+            -global_maritime_network.gpkg: 
+                Description: Nodes and edges of global maritime network
+                Reference: provided by Jasper Verschuur 
+            -Ports.shp
                 Description: Point locations of maritime ports
-                Reference: https://data.mendeley.com/datasets/kdyt24tsh5/1 (Jasper Verschuur)
+                Reference: https://data.mendeley.com/datasets/kdyt24tsh5/1 by Jasper Verschuur 
             -port_calls_average_2023-2025.csv:
                 Description: Port attribute data
                 Reference: Portwatch, provided by Jasper Verschuur https://portwatch.imf.org/
@@ -172,7 +175,7 @@ ports.py:
                 Description: large cluster network
             -pacific_network_maritime_network.gpkg
                 Description: Pacific network
-            -*cleaned_asia_pacific_maritime_network_PROVA_NEW1.gpkg
+            -*Final_asia_pacific_maritime_network_PROVA_NEW1.gpkg
                 Description: Asia-Pacific maritime network (made by combing the three seperate network clusters)
     Analysis:
         -Code initally copied from the African-transport-dataset/scripts/preprocess/ "ports_new_merge.py"
